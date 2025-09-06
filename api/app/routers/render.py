@@ -27,6 +27,7 @@ from ..services.prompts import PLANNER_SYSTEM, CRITIC_SYSTEM
 from ..services.redis import cache_get_set, sha1key
 from ..services.storage_adapter import put_object, signed_public_url
 from ..services.cost_tracker import CostTracker, extract_cost_from_openrouter_response, extract_cost_from_image_response, estimate_image_cost, CostInfo
+from ..services.synthid import get_verification_status, verify_image_synthid
 from ..core.security import InputSanitizer
 
 
@@ -130,7 +131,7 @@ def _validate_references(refs: List[str] | None) -> None:
                             {
                                 "url": "https://cdn.example.com/assets/design-001.png?expires=1640995200&signature=abc123",
                                 "r2_key": "public/project-123/550e8400-e29b-41d4-a716-446655440000.png",
-                                "synthid": {"present": True, "payload": ""}
+                                "synthid": {"present": False, "payload": ""}
                             }
                         ],
                         "audit": {
@@ -138,7 +139,7 @@ def _validate_references(refs: List[str] | None) -> None:
                             "model_route": "openrouter/gemini-2.5-flash-image",
                             "cost_usd": 0.05,
                             "guardrails_ok": True,
-                            "verified_by": "declared"
+                            "verified_by": "none"
                         }
                     }
                 }
@@ -354,10 +355,14 @@ async def render(request: RenderRequest = Body(
                 key = f"public/{request.project_id}/{uuid.uuid4()}.{fmt}"
                 put_object(key, data, content_type=f"image/{'jpeg' if fmt=='jpg' else fmt}")
                 url = signed_public_url(key, expires_seconds=15 * 60)
+                
+                # Verify SynthID (currently returns honest "none" status)
+                synthid_present, synthid_payload = verify_image_synthid(data, model_route)
+                
                 assets.append({
                     "url": url,
                     "r2_key": key,
-                    "synthid": {"present": False, "payload": ""},  # SynthID not exposed via API currently
+                    "synthid": {"present": synthid_present, "payload": synthid_payload},
                 })
         except Exception as e:
             raise StorageException(
@@ -397,6 +402,6 @@ async def render(request: RenderRequest = Body(
             "model_route": model_route,
             "cost_usd": round(cost_tracker.get_total_cost(), 4),  # Real cost tracking!
             "guardrails_ok": guardrails_ok,
-            "verified_by": "declared",
+            "verified_by": get_verification_status(),  # Honest verification status
         },
     }
