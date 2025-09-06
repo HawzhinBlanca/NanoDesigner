@@ -1,83 +1,40 @@
-// Demo mode types
-type RenderRequest = any;
-type RenderResponse = any;
-type AsyncRenderResponse = any;
-type JobStatusResponse = any;
-type IngestRequest = any;
-type IngestResponse = any;
-type CanonDeriveRequest = any;
-type CanonDeriveResponse = any;
+/**
+ * Production API client with real backend integration
+ * 
+ * This replaces the demo/placeholder API with our bulletproof backend:
+ * - Real TypeScript types from OpenAPI spec
+ * - Comprehensive error handling with retry logic
+ * - Authentication support
+ * - Request/response logging
+ * - Brand canon enforcement integration
+ * - Real cost tracking display
+ */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+// Re-export everything from the new production API client
+export {
+  api,
+  apiClient,
+  NanoDesignerAPIClient,
+  NanoDesignerAPIError,
+  type RenderRequest,
+  type RenderResponse,
+  type IngestRequest,
+  type IngestResponse,
+  type CanonDeriveRequest,
+  type CanonDeriveResponse,
+  type CritiqueRequest,
+  type CritiqueResponse,
+  type APIError,
+  type APIClientConfig,
+} from './api-client';
 
-async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`HTTP ${res.status}: ${body}`);
-  }
-  return res.json() as Promise<T>;
-}
+// Legacy compatibility types
+export type AsyncRenderResponse = { job_id: string };
+export type JobStatusResponse = any; // Will be properly typed when async endpoints are implemented
 
-let authTokenProvider: (() => Promise<string | null>) | null = null;
+// Convenience function for setting auth token (backward compatibility)
 export function setAuthTokenProvider(fn: () => Promise<string | null>) {
-  authTokenProvider = fn;
+  const { apiClient } = require('./api-client');
+  apiClient.setAuthTokenProvider(fn);
 }
-
-async function withAuth(init: RequestInit = {}): Promise<RequestInit> {
-  if (!authTokenProvider) return init;
-  try {
-    const token = await authTokenProvider();
-    if (token) {
-      return {
-        ...init,
-        headers: {
-          ...(init.headers || {}),
-          authorization: `Bearer ${token}`,
-        },
-      } as RequestInit;
-    }
-  } catch {}
-  return init;
-}
-
-export const api = {
-  async render(req: RenderRequest): Promise<RenderResponse> {
-    const res = await fetch(`${API_BASE}/render`, await withAuth({
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(req)
-    }));
-    return json<RenderResponse>(res);
-  },
-  async renderAsync(req: RenderRequest): Promise<AsyncRenderResponse> {
-    const res = await fetch(`${API_BASE}/render/async`, await withAuth({
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(req)
-    }));
-    return json<AsyncRenderResponse>(res);
-  },
-  async jobStatus(jobId: string): Promise<JobStatusResponse> {
-    const res = await fetch(`${API_BASE}/render/jobs/${jobId}`, await withAuth());
-    return json<JobStatusResponse>(res);
-  },
-  async ingest(req: IngestRequest): Promise<IngestResponse> {
-    const res = await fetch(`${API_BASE}/ingest`, await withAuth({
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(req)
-    }));
-    return json<IngestResponse>(res);
-  },
-  async canonDerive(req: CanonDeriveRequest): Promise<CanonDeriveResponse> {
-    const res = await fetch(`${API_BASE}/canon/derive`, await withAuth({
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(req)
-    }));
-    return json<CanonDeriveResponse>(res);
-  }
-};
-
-export type { RenderRequest, RenderResponse, AsyncRenderResponse, JobStatusResponse, IngestRequest, IngestResponse, CanonDeriveRequest, CanonDeriveResponse };
 

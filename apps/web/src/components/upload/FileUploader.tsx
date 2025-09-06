@@ -34,29 +34,31 @@ export function FileUploader({
       },
     })
       .use(XHRUpload, {
-        endpoint: `${process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000"}/ingest`,
+        endpoint: `${process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000"}/ingest/file`,
         method: "POST",
         formData: true,
-        fieldName: "files",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },
+        fieldName: "file",
+        headers: {},
         getResponseData: (xhr: XMLHttpRequest) => {
           try {
             const data = JSON.parse(xhr.responseText);
             return {
-              url: data.url,
-              uploadURL: data.url,
+              processed: data.processed,
+              qdrant_ids: data.qdrant_ids,
+              success: data.processed > 0
             };
           } catch (error) {
             console.error("Failed to parse response:", error);
-            return { url: "" };
+            return { success: false };
           }
         },
       })
   );
 
   useEffect(() => {
+    // Set project_id as metadata for all files
+    uppy.setMeta({ project_id: projectId });
+    
     uppy.on("complete", (result) => {
       console.log("Upload complete:", result);
       if (onUploadComplete && result.successful && result.successful.length > 0) {
@@ -71,7 +73,7 @@ export function FileUploader({
     return () => {
       uppy.destroy();
     };
-  }, [uppy, onUploadComplete]);
+  }, [uppy, onUploadComplete, projectId]);
 
   return (
     <div className="w-full">

@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useComposerStore } from "@/stores/useComposerStore";
-import { api, type RenderRequest } from "@/lib/api";
+import { api, apiClient, NanoDesignerAPIError, type RenderRequest, type RenderResponse } from "@/lib/api";
 import { connectJobWS, pollJob, type JobUpdate } from "@/lib/ws";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,8 @@ export default async function ComposePage({ params }: { params: Promise<{ id: st
   const [showConstraints, setShowConstraints] = useState(false);
   const [variantCount, setVariantCount] = useState(4);
   const [activeTab, setActiveTab] = useState<"preview" | "variants" | "compare">("preview");
+  const [lastRenderResult, setLastRenderResult] = useState<RenderResponse | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const pollAbortRef = useRef<AbortController | null>(null);
   const { items: templates } = useTemplatesStore();
   const templatesEnabled = useFeatureFlag("enable_templates");
@@ -78,99 +80,95 @@ export default async function ComposePage({ params }: { params: Promise<{ id: st
 
     setGenerating(true);
     setProgress(0);
+    setRenderError(null);
+    setLastRenderResult(null);
     track.previewStarted(resolvedParams.id);
 
-    // Generate variants
+    // Generate variants placeholders
     generateVariants(variantCount);
 
     const req: RenderRequest = {
       project_id: resolvedParams.id,
-      prompts: { task: "create", instruction: prompt },
-      outputs: { count: variantCount, format, dimensions },
-      constraints,
-    } as RenderRequest;
+      prompts: { 
+        task: "create", 
+        instruction: prompt,
+        references: references.length > 0 ? references : undefined
+      },
+      outputs: { count: variantCount, format: format as "png" | "jpg" | "webp", dimensions },
+      constraints: Object.keys(constraints).length > 0 ? {
+        palette_hex: constraints.palette,
+        fonts: constraints.fonts,
+        logo_safe_zone_pct: typeof constraints.logoSafeZone === 'number' ? constraints.logoSafeZone : 20.0
+      } : undefined,
+    };
 
     try {
-      const resp = await api.renderAsync(req);
-      if (resp.job_id) {
-        setJobId(resp.job_id);
-        let wsClosed = false;
-        let gotMessage = false;
-        let variantIndex = 0;
-
-        try {
-          const ws = connectJobWS(
-            resp.job_id,
-            (u) => {
-              gotMessage = true;
-              setProgress(u.progress || 0);
-
-              // Update variant with preview/final URLs
-              if (u.preview_url || u.url) {
-                const variant = variants[variantIndex];
-                if (variant) {
-                  updateVariant(variant.id, {
-                    previewUrl: u.preview_url,
-                    finalUrl: u.url,
-                    status: u.url ? "completed" : "generating",
-                  });
-                  if (u.url) variantIndex++;
-                }
-              }
-
-              if (u.status === "completed") {
-                setGenerating(false);
-                track.renderCompleted(resolvedParams.id);
-              } else if (u.status === "failed") {
-                setGenerating(false);
-                if (variants[variantIndex]) {
-                  updateVariant(variants[variantIndex]!.id, {
-                    status: "failed",
-                    error: u.error,
-                  });
-                }
-              }
-            },
-            () => {
-              wsClosed = true;
-            }
-          );
-
-          // Fallback to polling if WebSocket fails
-          setTimeout(() => {
-            if (!gotMessage || wsClosed) {
-              pollAbortRef.current?.abort();
-              const ac = new AbortController();
-              pollAbortRef.current = ac;
-              void pollJob(
-                resp.job_id!,
-                (u) => {
-                  setProgress(u.progress || 0);
-                  // Similar update logic as above
-                },
-                ac.signal
-              );
-            }
-          }, 3000);
-
-          setTimeout(() => ws.close(), 120000);
-        } catch {
-          // Fallback to polling
-          const ac = new AbortController();
-          pollAbortRef.current = ac;
-          void pollJob(
-            resp.job_id!,
-            (u) => {
-              setProgress(u.progress || 0);
-              // Similar update logic as above
-            },
-            ac.signal
-          );
+      // Use direct render endpoint for immediate results
+      setProgress(25);
+      const renderResult = await apiClient.render(req);
+      setProgress(75);
+      
+      // Store the full result for cost/audit display
+      setLastRenderResult(renderResult);
+      
+      // Update variants with actual results
+      renderResult.assets.forEach((asset: any, index: number) => {
+        const variant = variants[index];
+        if (variant) {
+          updateVariant(variant.id, {
+            finalUrl: asset.url,
+            status: "completed" as const,
+          });
         }
-      }
+      });
+
+      setProgress(100);
+      setGenerating(false);
+      track.renderCompleted(resolvedParams.id);
+      
+      // Log successful render with audit info
+      console.log('✅ Render completed:', {
+        cost: renderResult.audit.cost_usd,
+        traceId: renderResult.audit.trace_id,
+        canonEnforced: (renderResult.audit as any).brand_canon?.canon_enforced,
+        violations: (renderResult.audit as any).brand_canon?.violations_count,
+      });
+
     } catch (error) {
       console.error("Generation failed:", error);
       setGenerating(false);
+      setProgress(0);
+      
+      if (error instanceof NanoDesignerAPIError) {
+        // Handle specific API errors
+        if (error.isContentPolicyViolation) {
+          setRenderError(`Content policy violation: ${error.error.details || error.message}`);
+        } else if (error.isValidationError) {
+          setRenderError(`Validation error: ${error.message}`);
+        } else if (error.isRateLimited) {
+          setRenderError("Rate limit exceeded. Please wait before trying again.");
+        } else {
+          setRenderError(`API Error: ${error.message}`);
+        }
+        
+        // Mark all variants as failed
+        variants.forEach(variant => {
+          updateVariant(variant.id, {
+            status: "failed",
+            error: error.message,
+          });
+        });
+      } else {
+        setRenderError(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        
+        // Mark all variants as failed
+        variants.forEach(variant => {
+          updateVariant(variant.id, {
+            status: "failed",
+            error: "Generation failed",
+          });
+        });
+      }
     }
   }
 
@@ -210,6 +208,76 @@ export default async function ComposePage({ params }: { params: Promise<{ id: st
           </Button>
         </div>
       </div>
+
+      {/* Error Display */}
+      {renderError && (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-destructive">
+              <X className="h-4 w-4" />
+              <span className="font-medium">Generation Failed</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">{renderError}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Cost & Brand Canon Results */}
+      {lastRenderResult && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              Generation Results
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Cost Tracking */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Cost</span>
+                  <Badge variant="secondary">${(lastRenderResult.audit.cost_usd || 0).toFixed(4)}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Trace: {lastRenderResult.audit.trace_id}
+                </p>
+              </div>
+
+              {/* Brand Canon Enforcement */}
+              {(lastRenderResult.audit as any).brand_canon && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Brand Canon</span>
+                    <Badge variant={(lastRenderResult.audit as any).brand_canon.canon_enforced ? "default" : "secondary"}>
+                      {(lastRenderResult.audit as any).brand_canon.canon_enforced ? "Enforced" : "Not Applied"}
+                    </Badge>
+                  </div>
+                  {(lastRenderResult.audit as any).brand_canon.violations_count > 0 && (
+                    <p className="text-xs text-yellow-600">
+                      {(lastRenderResult.audit as any).brand_canon.violations_count} constraint violations detected
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Confidence: {((lastRenderResult.audit as any).brand_canon.confidence_score * 100).toFixed(0)}%
+                  </p>
+                </div>
+              )}
+
+              {/* Model & Verification */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Model</span>
+                  <Badge variant="outline">{lastRenderResult.audit.model_route}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Verified: {lastRenderResult.audit.verified_by}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Canvas Area */}
