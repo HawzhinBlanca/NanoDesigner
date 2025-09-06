@@ -31,6 +31,7 @@ from ..services.storage_adapter import put_object, signed_public_url
 from ..services.cost_tracker import CostTracker, extract_cost_from_openrouter_response, extract_cost_from_image_response, estimate_image_cost, CostInfo
 from ..services.synthid import get_verification_status, verify_image_synthid
 from ..services.error_handler import handle_errors, validate_input, safe_json_parse, retry_with_backoff, ErrorContext, get_error_handler
+from ..services.brand_canon_enforcer import enforce_brand_canon, CanonEnforcementResult
 from ..core.security import InputSanitizer
 
 logger = logging.getLogger(__name__)
@@ -398,13 +399,25 @@ async def render(request: RenderRequest = Body(
         
         guardrails_ok = True
 
-    # Step 2: Generate images
-    image_resp = None
+    # Step 2: Generate images with brand canon enforcement
+    canon_enforcement_result = None
     with trace.span("image_generate", {"model": model_route}):
-        prompt = _make_planner_prompt(request)
+        base_prompt = _make_planner_prompt(request)
+        
+        # Enforce brand canon in the generation prompt
+        with trace.span("brand_canon_enforcement"):
+            canon_enforcement_result = enforce_brand_canon(request, base_prompt, trace)
+            
+            # Log canon enforcement results
+            logger.info(f"Brand canon enforcement: {len(canon_enforcement_result.violations)} violations, "
+                       f"confidence {canon_enforcement_result.confidence_score:.2f}")
+            
+            # Use the canon-enhanced prompt for generation
+            enhanced_prompt = canon_enforcement_result.enhanced_prompt
+        
         count = request.outputs.count
         try:
-            imgs = generate_images(prompt, n=count, size=request.outputs.dimensions, trace=trace)
+            imgs = generate_images(enhanced_prompt, n=count, size=request.outputs.dimensions, trace=trace)
             
             # Estimate cost for image generation (since generate_images doesn't return cost info)
             image_cost = estimate_image_cost(model_route, count)
@@ -421,8 +434,12 @@ async def render(request: RenderRequest = Body(
             raise ImageGenerationException(
                 message=f"Image generation failed: {str(e)}",
                 model=model_route,
-                prompt_length=len(prompt),
-                details={"error_type": type(e).__name__}
+                prompt_length=len(enhanced_prompt),
+                details={
+                    "error_type": type(e).__name__,
+                    "canon_enforced": canon_enforcement_result.enforced if canon_enforcement_result else False,
+                    "canon_violations": len(canon_enforcement_result.violations) if canon_enforcement_result else 0
+                }
             )
 
     # Step 3: Store to R2 and build response assets
@@ -473,13 +490,22 @@ async def render(request: RenderRequest = Body(
 
     await trace.flush()
 
+    # Build comprehensive audit information
+    audit_info = {
+        "trace_id": trace_id,
+        "model_route": model_route,
+        "cost_usd": round(cost_tracker.get_total_cost(), 4),  # Real cost tracking!
+        "guardrails_ok": guardrails_ok,
+        "verified_by": get_verification_status(),  # Honest verification status
+    }
+    
+    # Add brand canon enforcement audit information
+    if canon_enforcement_result:
+        audit_info.update({
+            "brand_canon": canon_enforcement_result.to_audit_dict()
+        })
+    
     return {
         "assets": assets,
-        "audit": {
-            "trace_id": trace_id,
-            "model_route": model_route,
-            "cost_usd": round(cost_tracker.get_total_cost(), 4),  # Real cost tracking!
-            "guardrails_ok": guardrails_ok,
-            "verified_by": get_verification_status(),  # Honest verification status
-        },
+        "audit": audit_info,
     }
