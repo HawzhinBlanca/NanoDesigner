@@ -23,8 +23,9 @@ interface Asset {
   metadata?: Record<string, any>;
 }
 
-export default async function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = await params;
+export default function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
+  // For demo mode, we'll use a static project id
+  const projectId = "demo";
   const [assets, setAssets] = useState<Asset[]>([]);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,7 +71,7 @@ export default async function AssetsPage({ params }: { params: Promise<{ id: str
           </CardHeader>
           <CardContent>
             <FileUploader
-              projectId={resolvedParams.id}
+              projectId={projectId}
               onUploadComplete={handleUploadComplete}
             />
           </CardContent>

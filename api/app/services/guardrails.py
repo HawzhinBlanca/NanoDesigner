@@ -14,7 +14,8 @@ _SCHEMA_CACHE: Dict[str, Draft7Validator] = {}
 def _load_schema(name: str) -> Draft7Validator:
     if name in _SCHEMA_CACHE:
         return _SCHEMA_CACHE[name]
-    base = Path(__file__).resolve().parents[2]  # /app
+    # Get the project root (NanoDesigner directory)
+    base = Path(__file__).resolve().parents[3]  # /Users/hawzhin/NanoDesigner
     schema_path = base / "guardrails" / name
     with open(schema_path, "r", encoding="utf-8") as f:
         schema = json.load(f)

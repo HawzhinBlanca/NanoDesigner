@@ -28,9 +28,19 @@ def cache_get_set(key: str, factory: Callable[[], bytes], ttl: int = 86400) -> b
     return data
 
 
-def sha1key(*parts: str) -> str:
+def sha1key(*parts) -> str:
+    """Generate a SHA1 hash key from multiple parts.
+    
+    Args:
+        *parts: Variable number of parts to hash. None values are converted to empty strings.
+        
+    Returns:
+        str: 40-character hexadecimal SHA1 hash
+    """
     h = hashlib.sha1()
     for p in parts:
-        h.update(p.encode("utf-8"))
+        # Convert None to empty string, everything else to string
+        part_str = "" if p is None else str(p)
+        h.update(part_str.encode("utf-8"))
         h.update(b"|")
     return h.hexdigest()

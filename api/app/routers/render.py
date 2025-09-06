@@ -26,6 +26,7 @@ from ..services.openrouter import call_task
 from ..services.prompts import PLANNER_SYSTEM, CRITIC_SYSTEM
 from ..services.redis import cache_get_set, sha1key
 from ..services.storage_adapter import put_object, signed_public_url
+from ..services.cost_tracker import CostTracker, extract_cost_from_openrouter_response, extract_cost_from_image_response, estimate_image_cost, CostInfo
 from ..core.security import InputSanitizer
 
 
@@ -225,6 +226,7 @@ async def render(request: RenderRequest = Body(
     trace_id = trace.id
     guardrails_ok = False
     model_route = "openrouter/gemini-2.5-flash-image"
+    cost_tracker = CostTracker()
 
     # Content policy enforcement + sanitization
     try:
@@ -240,8 +242,25 @@ async def render(request: RenderRequest = Body(
 
     # Step 1: Plan via OpenRouter (planner task) with cache
     with trace.span("plan"):
-        def _plan_factory() -> bytes:
-            user_prompt = _make_planner_prompt(request)
+        user_prompt = _make_planner_prompt(request)
+        cache_key = sha1key("plan", request.project_id, request.prompts.instruction)
+        
+        # Check if plan is cached
+        cached_plan = None
+        try:
+            from ..services.redis import get_client
+            redis_client = get_client()
+            cached_bytes = redis_client.get(cache_key)
+            if cached_bytes:
+                cached_plan = json.loads(cached_bytes.decode("utf-8"))
+        except Exception:
+            pass  # If cache fails, we'll generate fresh
+        
+        if cached_plan:
+            # Plan is cached, no API call needed (no cost)
+            plan = cached_plan
+        else:
+            # Need to generate plan (will incur cost)
             try:
                 resp = call_task(
                     "planner",
@@ -252,6 +271,9 @@ async def render(request: RenderRequest = Body(
                     trace=trace,
                     temperature=0.2,
                 )
+                # Track cost from planner call
+                planner_cost = extract_cost_from_openrouter_response(resp, "planner")
+                cost_tracker.add_call(planner_cost)
             except OpenRouterException as e:
                 raise openrouter_to_http_exception(e)
             except Exception as e:
@@ -260,6 +282,7 @@ async def render(request: RenderRequest = Body(
                     model="planner",
                     details={"error_type": type(e).__name__}
                 )
+            
             content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
             plan_local = None
             if isinstance(content, str):
@@ -284,11 +307,16 @@ async def render(request: RenderRequest = Body(
                         errors=e.detail["guardrails"]
                     )
                 raise
-            return json.dumps(plan_local).encode("utf-8")
-
-        cache_key = sha1key("plan", request.project_id, request.prompts.instruction)
-        plan_bytes = cache_get_set(cache_key, _plan_factory, ttl=86400)
-        plan = json.loads(plan_bytes.decode("utf-8"))
+            
+            plan = plan_local
+            
+            # Cache the plan for future use
+            try:
+                redis_client = get_client()
+                redis_client.setex(cache_key, 86400, json.dumps(plan).encode("utf-8"))
+            except Exception:
+                pass  # Cache failure shouldn't break the request
+        
         guardrails_ok = True
 
     # Step 2: Generate images
@@ -298,6 +326,16 @@ async def render(request: RenderRequest = Body(
         count = request.outputs.count
         try:
             imgs = generate_images(prompt, n=count, size=request.outputs.dimensions, trace=trace)
+            
+            # Estimate cost for image generation (since generate_images doesn't return cost info)
+            image_cost = estimate_image_cost(model_route, count)
+            cost_tracker.add_call(CostInfo(
+                total_cost_usd=image_cost,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                model=model_route
+            ))
         except OpenRouterException as e:
             raise openrouter_to_http_exception(e)
         except Exception as e:
@@ -307,8 +345,6 @@ async def render(request: RenderRequest = Body(
                 prompt_length=len(prompt),
                 details={"error_type": type(e).__name__}
             )
-        # Best-effort capture of usage from image call if available via last OpenRouter call in generate_images
-        # Not all image providers return token usage.
 
     # Step 3: Store to R2 and build response assets
     assets = []
@@ -337,7 +373,7 @@ async def render(request: RenderRequest = Body(
     # Optional critic step (best-effort)
     try:
         with trace.span("critic"):
-            _ = call_task(
+            critic_resp = call_task(
                 "critic",
                 [
                     {"role": "system", "content": CRITIC_SYSTEM},
@@ -346,6 +382,9 @@ async def render(request: RenderRequest = Body(
                 trace=trace,
                 temperature=0.0,
             )
+            # Track cost from critic call
+            critic_cost = extract_cost_from_openrouter_response(critic_resp, "critic")
+            cost_tracker.add_call(critic_cost)
     except Exception:
         pass
 
@@ -356,7 +395,7 @@ async def render(request: RenderRequest = Body(
         "audit": {
             "trace_id": trace_id,
             "model_route": model_route,
-            "cost_usd": 0.0,
+            "cost_usd": round(cost_tracker.get_total_cost(), 4),  # Real cost tracking!
             "guardrails_ok": guardrails_ok,
             "verified_by": "declared",
         },

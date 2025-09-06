@@ -7,10 +7,7 @@ import pytest
 from app.services.redis import (
     cache_get_set,
     sha1key,
-    get_redis_client,
-    publish_job_update,
-    get_job_status,
-    set_job_status
+    get_client
 )
 
 
@@ -18,8 +15,7 @@ class TestRedisService:
     """Test cases for Redis caching service."""
 
     def test_sha1key_generation(self):
-        """Test SHA1 key generation with various inputs."""
-        # Test basic key generation
+        """Test SHA1 key generation consistency."""
         key1 = sha1key("test", "value1", "value2")
         key2 = sha1key("test", "value1", "value2")
         key3 = sha1key("test", "value1", "different")
@@ -51,198 +47,149 @@ class TestRedisService:
         assert isinstance(key2, str)
         assert key1 != key2
 
-    @patch('app.services.redis.redis.Redis')
-    def test_get_redis_client_success(self, mock_redis_class):
+    @patch('app.services.redis.redis.from_url')
+    def test_get_client_success(self, mock_from_url):
         """Test successful Redis client creation."""
         mock_client = Mock()
-        mock_redis_class.from_url.return_value = mock_client
+        mock_from_url.return_value = mock_client
         
         with patch('app.services.redis.settings') as mock_settings:
             mock_settings.redis_url = "redis://localhost:6379/0"
             
-            client = get_redis_client()
+            # Clear the global client to test initialization
+            import app.services.redis
+            app.services.redis._client = None
+            
+            client = get_client()
             
             assert client == mock_client
-            mock_redis_class.from_url.assert_called_once_with(
+            mock_from_url.assert_called_once_with(
                 "redis://localhost:6379/0", 
-                decode_responses=True
+                decode_responses=False
             )
 
     def test_cache_get_set_cache_hit(self):
         """Test cache_get_set when value exists in cache."""
         mock_client = Mock()
-        mock_client.get.return_value = b'cached_value'
+        cached_value = b'{"cached": "data"}'
+        mock_client.get.return_value = cached_value
         
-        factory_function = Mock()
-        factory_function.return_value = 'new_value'
+        factory_called = False
+        def test_factory():
+            nonlocal factory_called
+            factory_called = True
+            return b'{"new": "data"}'
         
-        result = cache_get_set(mock_client, 'test_key', factory_function, ttl=3600)
-        
-        # Should return cached value
-        assert result == b'cached_value'
-        
-        # Should not call factory function
-        factory_function.assert_not_called()
-        
-        # Should not set new value
-        mock_client.setex.assert_not_called()
+        with patch('app.services.redis.get_client', return_value=mock_client):
+            result = cache_get_set("test_key", test_factory, ttl=3600)
+            
+            # Should return cached value
+            assert result == cached_value
+            
+            # Factory should not be called
+            assert not factory_called
+            
+            # Redis get should be called
+            mock_client.get.assert_called_once_with("test_key")
+            
+            # Redis setex should not be called
+            mock_client.setex.assert_not_called()
 
     def test_cache_get_set_cache_miss(self):
         """Test cache_get_set when value doesn't exist in cache."""
         mock_client = Mock()
         mock_client.get.return_value = None  # Cache miss
         
-        factory_function = Mock()
-        factory_function.return_value = b'new_value'
+        new_value = b'{"new": "data"}'
+        def test_factory():
+            return new_value
         
-        result = cache_get_set(mock_client, 'test_key', factory_function, ttl=3600)
-        
-        # Should return factory result
-        assert result == b'new_value'
-        
-        # Should call factory function
-        factory_function.assert_called_once()
-        
-        # Should set new value in cache
-        mock_client.setex.assert_called_once_with('test_key', 3600, b'new_value')
+        with patch('app.services.redis.get_client', return_value=mock_client):
+            result = cache_get_set("test_key", test_factory, ttl=3600)
+            
+            # Should return factory value
+            assert result == new_value
+            
+            # Redis get should be called
+            mock_client.get.assert_called_once_with("test_key")
+            
+            # Redis setex should be called with factory result
+            mock_client.setex.assert_called_once_with("test_key", 3600, new_value)
 
     def test_cache_get_set_default_ttl(self):
-        """Test cache_get_set with default TTL."""
+        """Test cache_get_set uses default TTL when not specified."""
         mock_client = Mock()
         mock_client.get.return_value = None
         
-        factory_function = Mock()
-        factory_function.return_value = 'value'
+        new_value = b'{"test": "data"}'
+        def test_factory():
+            return new_value
         
-        cache_get_set(mock_client, 'key', factory_function)
-        
-        # Should use default TTL of 86400
-        mock_client.setex.assert_called_once_with('key', 86400, 'value')
-
-    def test_cache_get_set_string_key_conversion(self):
-        """Test cache_get_set with callable key."""
-        mock_client = Mock()
-        mock_client.get.return_value = None
-        
-        # Test with string key
-        key_func = lambda: 'computed_key'
-        factory_func = Mock()
-        factory_func.return_value = 'value'
-        
-        result = cache_get_set(mock_client, key_func, factory_func)
-        
-        # Should call key function and use result
-        mock_client.get.assert_called_once_with('computed_key')
-
-    @patch('app.services.redis.get_redis_client')
-    def test_publish_job_update(self, mock_get_client):
-        """Test publishing job status updates."""
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-        
-        update_data = {
-            'status': 'in_progress',
-            'progress': 50,
-            'message': 'Processing...'
-        }
-        
-        publish_job_update('job123', update_data)
-        
-        # Should publish to correct channel
-        expected_channel = 'job:job123'
-        expected_message = json.dumps(update_data)
-        mock_client.publish.assert_called_once_with(expected_channel, expected_message)
-
-    @patch('app.services.redis.get_redis_client')
-    def test_get_job_status(self, mock_get_client):
-        """Test retrieving job status."""
-        mock_client = Mock()
-        mock_client.hgetall.return_value = {
-            'status': 'completed',
-            'result_url': 'https://example.com/result.png'
-        }
-        mock_get_client.return_value = mock_client
-        
-        status = get_job_status('job123')
-        
-        # Should query correct key
-        mock_client.hgetall.assert_called_once_with('job:job123')
-        assert status == {
-            'status': 'completed',
-            'result_url': 'https://example.com/result.png'
-        }
-
-    @patch('app.services.redis.get_redis_client')
-    def test_set_job_status(self, mock_get_client):
-        """Test setting job status."""
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-        
-        status_data = {
-            'status': 'in_progress',
-            'started_at': '2024-01-01T00:00:00Z'
-        }
-        
-        set_job_status('job123', status_data)
-        
-        # Should set hash with correct key and data
-        mock_client.hset.assert_called_once_with('job:job123', mapping=status_data)
-
-    @patch('app.services.redis.get_redis_client')
-    def test_set_job_status_with_expiry(self, mock_get_client):
-        """Test setting job status with expiry."""
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-        
-        status_data = {'status': 'completed'}
-        
-        set_job_status('job123', status_data, ttl=3600)
-        
-        # Should set hash and expiry
-        mock_client.hset.assert_called_once_with('job:job123', mapping=status_data)
-        mock_client.expire.assert_called_once_with('job:job123', 3600)
+        with patch('app.services.redis.get_client', return_value=mock_client):
+            cache_get_set("test_key", test_factory)  # No TTL specified
+            
+            # Should use default TTL of 86400 (24 hours)
+            mock_client.setex.assert_called_once_with("test_key", 86400, new_value)
 
     def test_cache_get_set_factory_exception(self):
-        """Test cache_get_set when factory function raises exception."""
+        """Test cache_get_set handles factory exceptions."""
         mock_client = Mock()
-        mock_client.get.return_value = None  # Cache miss
+        mock_client.get.return_value = None
         
         def failing_factory():
             raise ValueError("Factory failed")
         
-        with pytest.raises(ValueError, match="Factory failed"):
-            cache_get_set(mock_client, 'test_key', failing_factory)
-        
-        # Should not set value in cache when factory fails
-        mock_client.setex.assert_not_called()
+        with patch('app.services.redis.get_client', return_value=mock_client):
+            with pytest.raises(ValueError, match="Factory failed"):
+                cache_get_set("test_key", failing_factory)
+            
+            # Redis get should be called
+            mock_client.get.assert_called_once_with("test_key")
+            
+            # Redis setex should not be called due to exception
+            mock_client.setex.assert_not_called()
 
-    @patch('app.services.redis.get_redis_client')
-    def test_redis_connection_error(self, mock_get_client):
-        """Test handling Redis connection errors."""
+    def test_cache_get_set_redis_exception(self):
+        """Test cache_get_set handles Redis exceptions gracefully."""
         mock_client = Mock()
-        mock_client.get.side_effect = ConnectionError("Redis unavailable")
-        mock_get_client.return_value = mock_client
+        mock_client.get.side_effect = Exception("Redis connection failed")
         
-        # Should propagate Redis connection errors
-        with pytest.raises(ConnectionError):
-            cache_get_set(mock_client, 'key', lambda: 'value')
+        new_value = b'{"fallback": "data"}'
+        def test_factory():
+            return new_value
+        
+        with patch('app.services.redis.get_client', return_value=mock_client):
+            # Should propagate Redis exceptions
+            with pytest.raises(Exception, match="Redis connection failed"):
+                cache_get_set("test_key", test_factory)
 
-    def test_cache_get_set_bytes_vs_string(self):
-        """Test cache_get_set handling of bytes vs string values."""
+    def test_multiple_cache_operations(self):
+        """Test multiple cache operations with different keys."""
         mock_client = Mock()
-        mock_client.get.return_value = None
         
-        # Test with bytes factory
-        bytes_factory = Mock()
-        bytes_factory.return_value = b'bytes_value'
+        # Setup different responses for different keys
+        def get_side_effect(key):
+            if key == "existing_key":
+                return b'{"existing": "value"}'
+            return None
         
-        result = cache_get_set(mock_client, 'key1', bytes_factory)
-        assert result == b'bytes_value'
+        mock_client.get.side_effect = get_side_effect
         
-        # Test with string factory
-        string_factory = Mock()
-        string_factory.return_value = 'string_value'
+        def factory1():
+            return b'{"new1": "value"}'
         
-        mock_client.get.return_value = None  # Reset for second test
-        result = cache_get_set(mock_client, 'key2', string_factory)
-        assert result == 'string_value'
+        def factory2():
+            return b'{"new2": "value"}'
+        
+        with patch('app.services.redis.get_client', return_value=mock_client):
+            # Test cache hit
+            result1 = cache_get_set("existing_key", factory1)
+            assert result1 == b'{"existing": "value"}'
+            
+            # Test cache miss
+            result2 = cache_get_set("new_key", factory2)
+            assert result2 == b'{"new2": "value"}'
+            
+            # Verify calls
+            assert mock_client.get.call_count == 2
+            mock_client.setex.assert_called_once_with("new_key", 86400, b'{"new2": "value"}')
