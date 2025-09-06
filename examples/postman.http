@@ -1,0 +1,12 @@
+### Sample Postman-style HTTP file
+
+GET {{baseUrl}}/healthz
+
+POST {{baseUrl}}/render
+Content-Type: application/json
+
+{
+  "project_id": "demo",
+  "prompts": {"task": "create", "instruction": "Create a banner"},
+  "outputs": {"count": 1, "format": "png", "dimensions": "512x512"}
+}

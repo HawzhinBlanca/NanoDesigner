@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "sgd-api"
+version = "1.0.0"
+description = "Smart Graphic Designer API"
+authors = ["Gemini"]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+fastapi = "^0.109.2"
+uvicorn = "^0.27.1"
+pydantic = "^2.6.1"
+httpx = "^0.26.0"
+boto3 = "^1.34.131"
+redis = "^5.0.4"
+jsonschema = "^4.22.0"
+google-cloud-documentai = "^2.25.0"
+unstructured = "^0.15.12"
+tenacity = "^8.4.1"
+qdrant-client = "^1.11.0"
+python-multipart = "^0.0.9"
+psycopg2-binary = "^2.9.9"
+psutil = "^6.0.0"
+langfuse = "^2.51.8"
+guardrails-ai = "^0.5.10"
+pyjwt = "^2.8.0"
+cryptography = "^42.0.8"
+sentence-transformers = "^3.0.1"
+websockets = "^13.1"
+# pytector = "==0.1.3"  # Removed - causing dependency conflicts
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

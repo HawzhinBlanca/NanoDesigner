@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["score","violations"],
+  "properties": {
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "violations": { "type": "array", "items": { "type": "string" } },
+    "repair_suggestions": { "type": "array", "items": { "type": "string" } }
+  }
+}

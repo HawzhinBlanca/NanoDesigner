@@ -1,0 +1,17 @@
+name: percy
+on: [push, pull_request]
+jobs:
+  visual-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with: { version: 9 }
+      - run: pnpm -C apps/web install
+      - name: Start web
+        run: pnpm -C apps/web dev -p 3060 &
+      - name: Percy snapshot
+        env:
+          PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
+        run: npx percy snapshot http://localhost:3060 --include "^/$" --include "/dashboard" --include "/projects/demo/compose"
+

@@ -1,0 +1,232 @@
+openapi: 3.0.3
+info:
+  title: Smart Graphic Designer API
+  description: |
+    # Smart Graphic Designer API
+    
+    A comprehensive AI-powered graphic design generation service that creates professional designs
+    based on text prompts, brand constraints, and reference materials.
+    
+    ## Key Features
+    
+    - **AI-Powered Generation**: Uses state-of-the-art models like Gemini 2.5 Flash Image
+    - **Brand Compliance**: Enforces color palettes, typography, and logo safe zones
+    - **Multiple Formats**: Supports PNG, JPG, and WebP outputs
+    - **Quality Assurance**: Built-in guardrails and validation
+    - **Real-time Updates**: WebSocket support for progress tracking
+    - **Comprehensive Audit**: Full traceability and cost tracking
+    
+    ## Authentication
+    
+    This API uses JWT authentication via Kong API Gateway.
+    
+    ## Rate Limits
+    
+    - **Standard**: 100 requests per minute per API key
+    - **Burst**: 30 requests in quick succession
+    
+    ## Cost Structure
+    
+    | Operation | Estimated Cost |
+    |-----------|----------------|
+    | Simple Design | $0.02-0.05 |
+    | Complex Design | $0.05-0.10 |
+    | Bulk Generation | $0.15-0.30 |
+    
+  version: 1.0.0
+  contact:
+    name: SGD API Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.example.com
+    description: Production server
+  - url: http://localhost:8000
+    description: Local development server
+
+security:
+  - JWTAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /metrics:
+    get:
+      summary: Basic metrics
+      responses:
+        '200':
+          description: OK
+  /render:
+    post:
+      summary: Render images
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderRequest'
+      responses:
+        '200':
+          description: Rendered assets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderResponse'
+        '422':
+          description: Guardrails validation error
+  /ingest:
+    post:
+      summary: Ingest assets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '200':
+          description: Ingested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+  /canon/derive:
+    post:
+      summary: Derive Brand Canon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanonDeriveRequest'
+      responses:
+        '200':
+          description: Canon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanonDeriveResponse'
+  /critique:
+    post:
+      summary: Critique assets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CritiqueRequest'
+      responses:
+        '200':
+          description: Critique
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CritiqueResponse'
+components:
+  schemas:
+    RenderRequest:
+      type: object
+      required: [project_id, prompts, outputs]
+      properties:
+        project_id: { type: string }
+        prompts:
+          type: object
+          required: [task, instruction]
+          properties:
+            task: { type: string, enum: [create, edit, variations] }
+            instruction: { type: string, minLength: 5 }
+            references:
+              type: array
+              items: { type: string }
+              maxItems: 8
+        outputs:
+          type: object
+          required: [count, format, dimensions]
+          properties:
+            count: { type: integer, minimum: 1, maximum: 6 }
+            format: { type: string, enum: [png, jpg, webp] }
+            dimensions: { type: string, pattern: '^[0-9]{2,5}x[0-9]{2,5}$' }
+        constraints:
+          type: object
+          properties:
+            palette_hex:
+              type: array
+              items: { type: string, pattern: '^#([0-9a-fA-F]{6})$' }
+              maxItems: 12
+            fonts: { type: array, items: { type: string }, maxItems: 6 }
+            logo_safe_zone_pct: { type: number, minimum: 0, maximum: 40 }
+    RenderResponse:
+      type: object
+      required: [assets, audit]
+      properties:
+        assets:
+          type: array
+          items:
+            type: object
+            required: [url, r2_key]
+            properties:
+              url: { type: string }
+              r2_key: { type: string }
+              synthid:
+                type: object
+                properties:
+                  present: { type: boolean }
+                  payload: { type: string }
+        audit:
+          type: object
+          properties:
+            trace_id: { type: string }
+            model_route: { type: string }
+            cost_usd: { type: number }
+            guardrails_ok: { type: boolean }
+            verified_by: { type: string, enum: [declared, external, none] }
+    IngestRequest:
+      type: object
+      required: [project_id, assets]
+      properties:
+        project_id: { type: string }
+        assets:
+          type: array
+          items: { type: string }
+          maxItems: 50
+    IngestResponse:
+      type: object
+      properties:
+        processed: { type: integer }
+        qdrant_ids: { type: array, items: { type: string } }
+    CanonDeriveRequest:
+      type: object
+      required: [project_id, evidence_ids]
+      properties:
+        project_id: { type: string }
+        evidence_ids: { type: array, items: { type: string } }
+    CanonDeriveResponse:
+      type: object
+      properties:
+        palette_hex: { type: array, items: { type: string } }
+        fonts: { type: array, items: { type: string } }
+        voice:
+          type: object
+          properties:
+            tone: { type: string }
+            dos: { type: array, items: { type: string } }
+            donts: { type: array, items: { type: string } }
+    CritiqueRequest:
+      type: object
+      required: [project_id, asset_ids]
+      properties:
+        project_id: { type: string }
+        asset_ids: { type: array, items: { type: string } }
+    CritiqueResponse:
+      type: object
+      properties:
+        score: { type: number, minimum: 0, maximum: 1 }
+        violations: { type: array, items: { type: string } }
+        repair_suggestions: { type: array, items: { type: string } }

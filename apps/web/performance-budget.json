@@ -1,0 +1,7 @@
+{
+  "lcp_ms": 2500,
+  "inp_ms": 200,
+  "cls": 0.1,
+  "initial_js_kb": 200,
+  "route_js_kb": 120
+}

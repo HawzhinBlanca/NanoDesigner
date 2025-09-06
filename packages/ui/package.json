@@ -1,0 +1,7 @@
+{
+  "name": "@sgd/ui",
+  "private": true,
+  "version": "0.0.0",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx"
+}

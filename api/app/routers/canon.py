@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import json
+from typing import List, Optional
+
+from fastapi import APIRouter, Body, HTTPException
+
+from ..models.schemas import CanonDeriveRequest, CanonDeriveResponse
+from ..services.guardrails import validate_contract
+from ..services.canon import extract_canon_from_evidence, derive_canon_from_project
+from ..services.redis import cache_get_set, sha1key
+from ..services.langfuse import Trace
+
+
+router = APIRouter()
+
+
+@router.post("/canon/derive", response_model=CanonDeriveResponse)
+async def canon_derive(request: CanonDeriveRequest = Body(...)):
+    """
+    Derive brand canon from evidence documents.
+    
+    Flow:
+    1. Fetch evidence documents from Qdrant
+    2. Extract brand elements using LLM
+    3. Validate with Guardrails
+    4. Cache result
+    5. Return normalized canon
+    """
+    trace = Trace("canon_derive")
+    project_id = request.project_id
+    evidence_ids = request.evidence_ids
+    
+    canon = None
+    
+    with trace.span("derive_canon"):
+        if evidence_ids:
+            # Use specific evidence IDs
+            canon = extract_canon_from_evidence(project_id, evidence_ids, trace)
+        else:
+            # Auto-derive from project assets
+            canon = derive_canon_from_project(project_id, trace=trace)
+    
+    # Validate with Guardrails
+    try:
+        validate_contract("canon.json", canon)
+    except Exception as e:
+        trace.log(f"Canon validation failed: {e}")
+        # Use safe defaults if validation fails
+        canon = {
+            "palette_hex": ["#000000", "#FFFFFF"],
+            "fonts": ["Helvetica", "Arial"],
+            "voice": {
+                "tone": "professional",
+                "dos": ["Be clear", "Be concise"],
+                "donts": ["Avoid jargon"]
+            }
+        }
+    
+    # Cache the derived canon
+    cache_key = sha1key("canon", project_id, "derived")
+    cache_get_set(
+        cache_key,
+        lambda: json.dumps(canon).encode("utf-8"),
+        ttl=86400 * 7  # Cache for 7 days
+    )
+    
+    await trace.flush()
+    
+    return CanonDeriveResponse(**canon)
+
+
+@router.get("/canon/{project_id}")
+async def get_canon(project_id: str):
+    """
+    Get cached canon for a project.
+    """
+    trace = Trace("get_canon")
+    
+    # Try to get from cache
+    cache_key = sha1key("canon", project_id, "latest")
+    
+    def _factory() -> bytes:
+        canon = derive_canon_from_project(project_id, trace=trace)
+        return json.dumps(canon).encode("utf-8")
+    
+    canon_bytes = cache_get_set(cache_key, _factory, ttl=86400)
+    canon = json.loads(canon_bytes.decode("utf-8"))
+    
+    await trace.flush()
+    
+    return canon

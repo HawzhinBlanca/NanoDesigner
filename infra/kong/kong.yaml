@@ -1,0 +1,70 @@
+_format_version: "3.0"
+services:
+  - name: sgd-api
+    url: http://api:8000
+    routes:
+      - name: sgd-api-route
+        paths:
+          - /
+        strip_path: false
+      - name: health-route
+        paths:
+          - /healthz
+          - /metrics
+        strip_path: false
+        plugins:
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - Authorization
+plugins:
+  - name: jwt
+    route: sgd-api-route
+    config:
+      key_claim_name: sub
+      claims_to_verify: [exp]
+      secret_is_base64: false
+      run_on_preflight: false
+      uri_param_names: [jwt]
+      cookie_names: [__session, __clerk_session]
+      header_names: [Authorization]
+  - name: rate-limiting
+    config:
+      second: 10
+      minute: 100
+      hour: 1000
+      policy: local
+      limit_by: credential
+      fault_tolerant: true
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 10
+      size_unit: megabytes
+  - name: cors
+    config:
+      origins: ["*"]
+      methods: [GET, POST, PUT, DELETE, OPTIONS]
+      headers: [Authorization, Content-Type, X-Requested-With]
+      credentials: true
+      max_age: 3600
+  - name: bot-detection
+    config:
+      deny: ["curl/7.*", "Postman*"]
+      allow: ["Mozilla/*", "Chrome/*", "Safari/*"]
+consumers:
+  - username: demo
+    custom_id: demo-user
+  - username: service
+    custom_id: service-account
+jwt_secrets:
+  - consumer: demo
+    key: demo-issuer
+    secret: demo-secret-key-for-testing-only
+    algorithm: HS256
+  - consumer: service
+    key: service-issuer
+    secret: service-secret-key-for-internal-use
+    algorithm: HS256
+# For Clerk integration, configure CLERK_JWKS_URL in environment
+# Kong will validate JWTs using the JWKS endpoint

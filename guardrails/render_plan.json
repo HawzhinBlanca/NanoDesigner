@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "required": ["goal","ops","safety"],
+  "properties": {
+    "goal": { "type": "string", "minLength": 5 },
+    "ops": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["local_edit","inpaint","style_transfer","multi_image_fusion","text_overlay"] }
+    },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "respect_logo_safe_zone": { "type": "boolean" },
+        "palette_only": { "type": "boolean" }
+      }
+    }
+  }
+}

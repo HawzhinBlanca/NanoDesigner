@@ -1,0 +1,44 @@
+### Health
+GET http://localhost:8000/healthz
+
+### Render
+POST http://localhost:8000/render
+Content-Type: application/json
+
+{
+  "project_id": "demo",
+  "prompts": {
+    "task": "create",
+    "instruction": "Create a social banner for product launch",
+    "references": []
+  },
+  "outputs": {"count": 1, "format": "png", "dimensions": "1024x1024"},
+  "constraints": {"palette_hex": ["#FF0000", "#00FF00"]}
+}
+
+### Ingest
+POST http://localhost:8000/ingest
+Content-Type: application/json
+
+{
+  "project_id": "demo",
+  "assets": ["https://example.com/brand.pdf", "s3://bucket/logo.png"]
+}
+
+### Canon
+POST http://localhost:8000/canon/derive
+Content-Type: application/json
+
+{
+  "project_id": "demo",
+  "evidence_ids": ["a1", "b2", "c3"]
+}
+
+### Critique
+POST http://localhost:8000/critique
+Content-Type: application/json
+
+{
+  "project_id": "demo",
+  "asset_ids": ["img1", "img2"]
+}
