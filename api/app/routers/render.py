@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import List
 
@@ -14,6 +15,7 @@ from ..models.exceptions import (
     GuardrailsValidationException,
     ImageGenerationException,
     StorageException,
+    ValidationError,
     openrouter_to_http_exception,
     guardrails_to_http_exception,
     content_policy_to_http_exception,
@@ -28,7 +30,10 @@ from ..services.redis import cache_get_set, sha1key
 from ..services.storage_adapter import put_object, signed_public_url
 from ..services.cost_tracker import CostTracker, extract_cost_from_openrouter_response, extract_cost_from_image_response, estimate_image_cost, CostInfo
 from ..services.synthid import get_verification_status, verify_image_synthid
+from ..services.error_handler import handle_errors, validate_input, safe_json_parse, retry_with_backoff, ErrorContext, get_error_handler
 from ..core.security import InputSanitizer
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -56,42 +61,97 @@ def _make_planner_prompt(req: RenderRequest) -> str:
 
 
 def _content_filter(text: str) -> None:
-    from pathlib import Path
-
-    # In container, policies directory is copied to /app/policies
-    root = Path(__file__).resolve().parents[2]  # /app
-    terms = (root / "policies" / "blacklist.txt").read_text(encoding="utf-8").splitlines()
-    low = text.lower()
-    for t in terms:
-        t = t.strip()
-        if not t:
-            continue
-        if t in low:
-            raise ContentPolicyViolationException(
-                violation_type="banned_term",
-                details=f"Instruction contains banned term: {t}"
-            )
+    """Enhanced content filtering with better error handling."""
+    if not text or not isinstance(text, str):
+        raise ValidationError("instruction", "Instruction must be a non-empty string", text)
+    
+    if len(text.strip()) < 3:
+        raise ValidationError("instruction", "Instruction must be at least 3 characters long", text)
+    
+    if len(text) > 5000:
+        raise ValidationError("instruction", "Instruction must be less than 5000 characters", len(text))
+    
+    try:
+        from pathlib import Path
+        # In container, policies directory is copied to /app/policies
+        root = Path(__file__).resolve().parents[2]  # /app
+        blacklist_file = root / "policies" / "blacklist.txt"
+        
+        if not blacklist_file.exists():
+            logger.warning("Blacklist file not found, skipping content filtering")
+            return
+            
+        terms = blacklist_file.read_text(encoding="utf-8").splitlines()
+        low = text.lower()
+        
+        for t in terms:
+            t = t.strip()
+            if not t or t.startswith("#"):  # Skip empty lines and comments
+                continue
+            if t in low:
+                raise ContentPolicyViolationException(
+                    violation_type="banned_term",
+                    details=f"Instruction contains banned term: {t}"
+                )
+    except (IOError, OSError) as e:
+        logger.error(f"Failed to read blacklist file: {e}")
+        # Continue without content filtering rather than failing the request
+        pass
 
 
 def _validate_references(refs: List[str] | None) -> None:
+    """Enhanced reference validation with comprehensive checks."""
     if not refs:
         return
+    
+    if len(refs) > 10:
+        raise ValidationError("references", "Maximum 10 references allowed", len(refs))
+    
     import os
     from urllib.parse import urlparse
-
+    
     allow = os.getenv("REF_URL_ALLOW_HOSTS")
     allowed_hosts = {h.strip() for h in allow.split(",")} if allow else set()
-    for r in refs:
-        u = urlparse(r)
-        if u.scheme and u.scheme != "https":
+    
+    for i, r in enumerate(refs):
+        if not isinstance(r, str):
+            raise ValidationError(f"references[{i}]", "Reference must be a string", type(r).__name__)
+        
+        if len(r) > 2048:
+            raise ValidationError(f"references[{i}]", "Reference URL too long (max 2048 chars)", len(r))
+        
+        try:
+            u = urlparse(r)
+        except Exception as e:
+            raise ValidationError(f"references[{i}]", f"Invalid URL format: {str(e)}", r)
+        
+        if not u.scheme:
+            raise ContentPolicyViolationException(
+                violation_type="missing_protocol",
+                details=f"Reference {i+1} missing protocol (https required)"
+            )
+        
+        if u.scheme != "https":
             raise ContentPolicyViolationException(
                 violation_type="invalid_protocol",
-                details="Only https references allowed"
+                details=f"Reference {i+1} uses {u.scheme}, only https allowed"
             )
+        
+        if not u.hostname:
+            raise ValidationError(f"references[{i}]", "Reference URL missing hostname", r)
+        
+        # Check for suspicious patterns
+        suspicious_patterns = [".onion", "localhost", "127.0.0.1", "0.0.0.0", "::1"]
+        if any(pattern in u.hostname.lower() for pattern in suspicious_patterns):
+            raise ContentPolicyViolationException(
+                violation_type="suspicious_host",
+                details=f"Reference {i+1} uses suspicious hostname: {u.hostname}"
+            )
+        
         if allowed_hosts and u.hostname not in allowed_hosts:
             raise ContentPolicyViolationException(
                 violation_type="forbidden_host",
-                details=f"Reference host {u.hostname} not allowed"
+                details=f"Host {u.hostname} not in allowed hosts: {', '.join(allowed_hosts)}"
             )
 
 
@@ -201,6 +261,7 @@ def _validate_references(refs: List[str] | None) -> None:
     },
     tags=["Generation"]
 )
+@handle_errors("render", fallback_response={"assets": [], "audit": {"error": "Service degraded"}})
 async def render(request: RenderRequest = Body(
     ...,
     description="Design generation request with prompts, output specs, and constraints",
@@ -285,19 +346,36 @@ async def render(request: RenderRequest = Body(
                 )
             
             content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
-            plan_local = None
-            if isinstance(content, str):
-                try:
-                    plan_local = json.loads(content)
-                except Exception:
-                    start = content.find("{")
-                    end = content.rfind("}")
-                    if start != -1 and end != -1 and end > start:
-                        plan_local = json.loads(content[start : end + 1])
+            
+            # Enhanced JSON parsing with better error handling
+            plan_local = safe_json_parse(
+                content, 
+                "planner_response",
+                fallback=None
+            )
+            
+            # If direct parsing failed, try to extract JSON from content
+            if plan_local is None and isinstance(content, str):
+                logger.warning("Direct JSON parsing failed, attempting extraction")
+                start = content.find("{")
+                end = content.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    json_content = content[start : end + 1]
+                    plan_local = safe_json_parse(
+                        json_content,
+                        "extracted_planner_response", 
+                        fallback=None
+                    )
+            
             if not isinstance(plan_local, dict):
+                logger.error(f"Planner returned invalid response: {content[:200]}...")
                 raise GuardrailsValidationException(
                     contract_name="render_plan.json",
-                    errors=["Planner did not return valid JSON object"]
+                    errors=[
+                        "Planner did not return valid JSON object",
+                        f"Response type: {type(plan_local).__name__}",
+                        f"Content preview: {str(content)[:100]}..."
+                    ]
                 )
             try:
                 validate_contract("render_plan.json", plan_local)
