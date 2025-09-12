@@ -9,6 +9,7 @@ export const metadata: Metadata = {
 };
 
 import { Nav } from "@/components/common/Nav";
+import { ServiceWorkerRegistration } from "@/components/common/ServiceWorkerRegistration";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,9 +17,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="[&_*:where(button,a)]:min-h-[44px]">
         <AppFlagsProvider>
           <Providers>
+            <ServiceWorkerRegistration />
             <Nav />
             {children}
-            <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}))}` }} />
           </Providers>
         </AppFlagsProvider>
       </body>

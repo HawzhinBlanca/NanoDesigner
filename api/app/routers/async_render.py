@@ -2,12 +2,13 @@
 Async render endpoints for queue-based processing
 """
 
-from typing import Dict, Any
-from fastapi import APIRouter, Body, HTTPException
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel
 
 from ..models.schemas import RenderRequest
 from ..services.queue import render_queue
+from ..core.security import extract_org_id_from_request_headers
 from ..services.guardrails import validate_contract
 from ..services.langfuse import Trace
 import json
@@ -18,30 +19,30 @@ router = APIRouter()
 
 class AsyncRenderResponse(BaseModel):
     """Response for async render request"""
-    job_id: str | None
+    job_id: Optional[str]
     cached: bool
-    content_hash: str | None = None
-    url: str | None = None
-    preview_url: str | None = None
-    websocket_url: str | None = None
+    content_hash: Optional[str] = None
+    url: Optional[str] = None
+    preview_url: Optional[str] = None
+    websocket_url: Optional[str] = None
     
 
 class JobStatusResponse(BaseModel):
     """Job status response"""
     status: str
-    job_id: str | None = None
-    progress: int | None = None
-    preview_url: str | None = None
-    url: str | None = None
-    r2_key: str | None = None
-    error: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-    synthid: Dict[str, Any] | None = None
+    job_id: Optional[str] = None
+    progress: Optional[int] = None
+    preview_url: Optional[str] = None
+    url: Optional[str] = None
+    # r2_key removed from public response
+    error: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    synthid: Optional[Dict[str, Any]] = None
 
 
 @router.post("/render/async", response_model=AsyncRenderResponse)
-async def async_render(request: RenderRequest = Body(...)):
+async def async_render(request: RenderRequest = Body(...), http_request: Request = None):
     """
     Async render endpoint that uses Redis queue for processing.
     
@@ -65,12 +66,17 @@ async def async_render(request: RenderRequest = Body(...)):
     _validate_references(getattr(request.prompts, "references", None))
     
     # Create payload for queue
+    # Extract org context for async path
+    headers = dict(http_request.headers) if http_request is not None else {}
+    org_id = extract_org_id_from_request_headers(headers, fallback=request.project_id)
+
     payload = {
         "project_id": request.project_id,
         "prompts": request.prompts.model_dump(),
         "outputs": request.outputs.model_dump(),
         "constraints": request.constraints.model_dump() if request.constraints else None,
-        "trace_id": trace.id
+        "trace_id": trace.id,
+        "org_id": org_id,
     }
     
     try:

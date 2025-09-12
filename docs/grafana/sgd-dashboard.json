@@ -1,0 +1,95 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+    ],
+  "title": "SGD API Overview",
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Request Rate (rps)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(api_requests_total[5m])) by (method, endpoint)", "legendFormat": "{{method}} {{endpoint}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "req/s" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Error Rate (%)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "100 * (sum(rate(api_requests_total{status_code!~\"2..\"}[5m])) / sum(rate(api_requests_total[5m])))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg Request Duration (s)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "avg(api_request_duration_seconds) by (method, endpoint)", "legendFormat": "{{method}} {{endpoint}}" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Queue Depth",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "queue_depth_current" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Active WebSocket Connections",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "websocket_connections_active" } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis Ops (by type)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "sum(rate(redis_operations_total[5m])) by (operation)", "legendFormat": "{{operation}}" } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Qdrant Ops (by type)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "sum(rate(qdrant_operations_total[5m])) by (operation)", "legendFormat": "{{operation}}" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Uptime (h)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "application_uptime_seconds / 3600" } ],
+      "fieldConfig": { "defaults": { "unit": "h" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU (%)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "process_cpu_percent" } ],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory (bytes)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "process_memory_bytes" } ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Open FDs",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "process_open_fds" } ]
+    }
+  ],
+  "schemaVersion": 38,
+  "version": 1
+}
+

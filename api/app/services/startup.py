@@ -36,21 +36,8 @@ def init_qdrant_collections():
                 )
                 logger.info(f"Created collection {collection_name}")
                 
-                # Add a dummy vector to initialize the collection
-                import uuid
-                client.upsert(
-                    collection_name=collection_name,
-                    points=[
-                        PointStruct(
-                            id=str(uuid.uuid4()),
-                            vector=[0.0] * 768,
-                            payload={
-                                "type": "initialization",
-                                "content": "Initial placeholder vector"
-                            }
-                        )
-                    ]
-                )
+                # Initialize collection with proper schema only
+                logger.info(f"Collection {collection_name} created and ready for data")
         
         return True
     except Exception as e:

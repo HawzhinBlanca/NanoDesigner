@@ -1,42 +1,93 @@
 "use client";
 
-import { useState } from "react";
-import dynamic from "next/dynamic";
-const FileUploader = dynamic(() => import("@/components/upload/FileUploader").then(m => m.FileUploader), { ssr: false });
+import { useState, useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { SimpleFileUploader } from "@/components/upload/SimpleFileUploader";
 // import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs"; // Removed for demo mode
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, Filter, Grid, List, Download, Trash2, Tag, Folder, Upload, FileImage, FolderOpen } from "lucide-react";
+import { Search, Filter, Grid, List, Download, Trash2, Tag, Folder, Upload, FileImage, FolderOpen, ArrowLeft } from "lucide-react";
 
 interface Asset {
   id: string;
-  name: string;
-  type: string;
-  size: number;
-  uploadedAt: Date;
-  tags: string[];
-  folder?: string;
-  thumbnailUrl?: string;
-  metadata?: Record<string, any>;
+  fileName: string;
+  storedFileName: string;
+  fileSize: number;
+  fileType: string;
+  url: string;
+  uploadedAt: string;
 }
 
-export default function AssetsPage({ params }: { params: Promise<{ id: string }> }) {
-  // For demo mode, we'll use a static project id
-  const projectId = "demo";
-  const [assets, setAssets] = useState<Asset[]>([]);
+interface Project {
+  id: string;
+  name: string;
+  description: string;
+  assets: Asset[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export default function AssetsPage() {
+  const params = useParams();
+  const router = useRouter();
+  const projectId = params?.id as string;
+  const [project, setProject] = useState<Project | null>(null);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showUploader, setShowUploader] = useState(false);
 
-  const handleUploadComplete = (files: any[]) => {
-    console.log("Files uploaded:", files);
-    // TODO: Refresh assets list
+  // Fetch project data including assets
+  const fetchProject = async () => {
+    if (!projectId) return;
+    
+    setLoading(true);
+    try {
+      // Try to load from localStorage first (for demo mode)
+      if (typeof window !== 'undefined') {
+        try {
+          const { demoStorage } = await import('@/lib/demo-storage');
+          const storedProject = demoStorage.getProject(projectId);
+          const storedAssets = demoStorage.getAssetsByProject(projectId);
+          
+          if (storedProject) {
+            setProject({
+              ...storedProject,
+              assets: storedAssets
+            });
+            setLoading(false);
+            return;
+          }
+        } catch (storageError) {
+          console.error('Error loading from localStorage:', storageError);
+        }
+      }
+      
+      // Fallback to API
+      const response = await fetch(`/api/projects/${projectId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setProject(data.project);
+      }
+    } catch (error) {
+      console.error('Failed to fetch project:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProject();
+  }, [projectId]);
+
+  const handleUploadComplete = (files: { url: string; name: string; size: number; type: string }[]) => {
+    // Files uploaded successfully, refresh project data
+    fetchProject();
     setShowUploader(false);
   };
 
@@ -48,17 +99,42 @@ export default function AssetsPage({ params }: { params: Promise<{ id: string }>
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
   };
 
+  const filteredAssets = project?.assets?.filter(asset => {
+    if (searchQuery) {
+      return asset.fileName.toLowerCase().includes(searchQuery.toLowerCase());
+    }
+    return true;
+  }) || [];
+
   return (
     <main className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Assets</h1>
-          <p className="text-gray-600 mt-1">Manage your project assets</p>
+        <div className="flex items-center gap-4">
+          <Button 
+            variant="ghost" 
+            size="icon"
+            onClick={() => router.push(`/projects/${projectId}`)}
+            className="hover:bg-gray-100"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">{project?.name || 'Loading...'} - Assets</h1>
+            <p className="text-gray-600 mt-1">Manage your project assets</p>
+          </div>
         </div>
-        <Button onClick={() => setShowUploader(!showUploader)}>
-          <Upload className="h-4 w-4 mr-2" />
-          {showUploader ? "Hide Uploader" : "Upload Assets"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline"
+            onClick={() => router.push(`/projects/${projectId}`)}
+          >
+            Back to Project
+          </Button>
+          <Button onClick={() => setShowUploader(!showUploader)}>
+            <Upload className="h-4 w-4 mr-2" />
+            {showUploader ? "Hide Uploader" : "Upload Assets"}
+          </Button>
+        </div>
       </div>
 
       {showUploader && (
@@ -70,7 +146,7 @@ export default function AssetsPage({ params }: { params: Promise<{ id: string }>
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <FileUploader
+            <SimpleFileUploader
               projectId={projectId}
               onUploadComplete={handleUploadComplete}
             />
@@ -120,7 +196,7 @@ export default function AssetsPage({ params }: { params: Promise<{ id: string }>
                 <Skeleton key={i} className={view === "grid" ? "h-48" : "h-16"} />
               ))}
             </div>
-          ) : assets.length === 0 ? (
+          ) : filteredAssets.length === 0 ? (
             <div className="text-center py-12">
               <div className="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                 <FolderOpen className="h-10 w-10 text-gray-400" />
@@ -138,44 +214,40 @@ export default function AssetsPage({ params }: { params: Promise<{ id: string }>
             </div>
           ) : (
             <div className={view === "grid" ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" : "space-y-2"}>
-              {assets.map((asset) => (
+              {filteredAssets.map((asset) => (
                 <Card key={asset.id} className={view === "grid" ? "" : "flex items-center justify-between p-4"}>
                   {view === "grid" ? (
                     <>
                       <div className="aspect-square bg-muted rounded-t-lg flex items-center justify-center">
-                        {asset.thumbnailUrl ? (
-                          <img src={asset.thumbnailUrl} alt={asset.name} className="object-cover w-full h-full rounded-t-lg" />
+                        {asset.fileType?.startsWith('image/') ? (
+                          <img src={asset.url} alt={asset.fileName} className="object-cover w-full h-full rounded-t-lg" />
                         ) : (
                           <div className="text-4xl text-muted-foreground">📄</div>
                         )}
                       </div>
                       <CardContent className="p-4">
-                        <p className="font-medium truncate">{asset.name}</p>
-                        <p className="text-sm text-muted-foreground">{formatFileSize(asset.size)}</p>
-                        <div className="flex gap-1 mt-2">
-                          {asset.tags.slice(0, 2).map((tag) => (
-                            <Badge key={tag} variant="secondary" className="text-xs">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
+                        <p className="font-medium truncate">{asset.fileName}</p>
+                        <p className="text-sm text-muted-foreground">{formatFileSize(asset.fileSize)}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {new Date(asset.uploadedAt).toLocaleDateString()}
+                        </p>
                       </CardContent>
                     </>
                   ) : (
                     <>
                       <div className="flex items-center gap-4 flex-1">
                         <div className="h-12 w-12 bg-muted rounded flex items-center justify-center">
-                          {asset.thumbnailUrl ? (
-                            <img src={asset.thumbnailUrl} alt={asset.name} className="object-cover w-full h-full rounded" />
+                          {asset.fileType?.startsWith('image/') ? (
+                            <img src={asset.url} alt={asset.fileName} className="object-cover w-full h-full rounded" />
                           ) : (
                             <div className="text-lg">📄</div>
                           )}
                         </div>
                         <div className="flex-1">
-                          <p className="font-medium">{asset.name}</p>
+                          <p className="font-medium">{asset.fileName}</p>
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{formatFileSize(asset.size)}</span>
-                            <span>{asset.type}</span>
+                            <span>{formatFileSize(asset.fileSize)}</span>
+                            <span>{asset.fileType}</span>
                             <span>{new Date(asset.uploadedAt).toLocaleDateString()}</span>
                           </div>
                         </div>

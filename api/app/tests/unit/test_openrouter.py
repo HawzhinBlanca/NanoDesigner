@@ -2,7 +2,7 @@
 
 import json
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, MagicMock, patch
 import httpx
 
 from app.services.openrouter import (
@@ -24,7 +24,7 @@ class TestOpenRouterService:
             headers = _headers()
             
             assert headers['Authorization'] == 'Bearer test-key'
-            assert headers['HTTP-Referer'] == 'https://yourapp'
+            assert headers['HTTP-Referer'] == 'http://localhost:8000'
             assert headers['Content-Type'] == 'application/json'
             assert 'X-Title' in headers
 
@@ -36,7 +36,7 @@ class TestOpenRouterService:
         mock_response.json.return_value = {
             'choices': [{'message': {'content': 'Test response'}}]
         }
-        mock_client_instance = Mock()
+        mock_client_instance = MagicMock()
         mock_client_instance.post.return_value = mock_response
         mock_client_instance.__enter__.return_value = mock_client_instance
         mock_client_instance.__exit__.return_value = None
@@ -60,7 +60,7 @@ class TestOpenRouterService:
         mock_response.status_code = 429
         mock_response.text = 'Rate limit exceeded'
         
-        mock_client_instance = Mock()
+        mock_client_instance = MagicMock()
         mock_client_instance.post.side_effect = httpx.HTTPStatusError(
             "Rate limit", request=Mock(), response=mock_response
         )
@@ -83,7 +83,7 @@ class TestOpenRouterService:
         mock_response.json.return_value = {
             'data': [{'b64_json': 'base64encodedimage'}]
         }
-        mock_client_instance = Mock()
+        mock_client_instance = MagicMock()
         mock_client_instance.post.return_value = mock_response
         mock_client_instance.__enter__.return_value = mock_client_instance
         mock_client_instance.__exit__.return_value = None
@@ -145,6 +145,10 @@ class TestOpenRouterService:
         mock_policy.model_for.return_value = 'test-model'
         mock_policy.fallbacks_for.return_value = ['fallback-model']
         mock_policy.timeout_ms_for.return_value = 30000
+        mock_policy.retry_conf.return_value = {
+            'max_attempts': 2,
+            'backoff_ms': 400
+        }
         mock_load_policy.return_value = mock_policy
 
         # Setup mock response
@@ -171,6 +175,10 @@ class TestOpenRouterService:
         mock_policy.model_for.return_value = 'primary-model'
         mock_policy.fallbacks_for.return_value = ['fallback-model']
         mock_policy.timeout_ms_for.return_value = 30000
+        mock_policy.retry_conf.return_value = {
+            'max_attempts': 2,
+            'backoff_ms': 400
+        }
         mock_load_policy.return_value = mock_policy
 
         # Setup mock to fail on first call, succeed on second
@@ -198,6 +206,10 @@ class TestOpenRouterService:
         mock_policy.model_for.return_value = 'test-model'
         mock_policy.fallbacks_for.return_value = []
         mock_policy.timeout_ms_for.return_value = 30000
+        mock_policy.retry_conf.return_value = {
+            'max_attempts': 2,
+            'backoff_ms': 400
+        }
         mock_load_policy.return_value = mock_policy
 
         # Setup mock response
@@ -206,8 +218,8 @@ class TestOpenRouterService:
         }
 
         # Setup mock trace
-        mock_trace = Mock()
-        mock_span = Mock()
+        mock_trace = MagicMock()
+        mock_span = MagicMock()
         mock_trace.span.return_value = mock_span
         mock_span.__enter__.return_value = mock_span
         mock_span.__exit__.return_value = None

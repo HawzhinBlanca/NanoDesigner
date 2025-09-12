@@ -5,7 +5,7 @@ import uuid
 from typing import List, Optional
 import json
 
-from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Header, Request
 from pydantic import BaseModel
 
 from ..models.schemas import IngestRequest, IngestResponse
@@ -14,9 +14,11 @@ from ..services.redis import cache_get_set, sha1key
 from ..services.qdrant import upsert_vectors, ensure_collections_sync, upsert_vectors_sync
 from ..services.unstructured import basic_parse_text_blobs
 from ..services.docai import process_document_bytes, extract_text_blocks
-from ..services.storage_r2 import put_object, get_object
+from ..services.storage_adapter import put_object, get_object, put_quarantine, promote_quarantine_to_public
+from ..core.security import extract_org_id_from_request_headers
 from ..services.canon import extract_canon_from_evidence
 from ..services.langfuse import Trace
+from ..services.security_scanner import scan_upload, strip_exif_from_image
 from ..core.config import settings
 from ..core.security import InputSanitizer
 
@@ -25,7 +27,11 @@ router = APIRouter()
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest(request: IngestRequest = Body(...)):
+async def ingest(
+    request: IngestRequest = Body(...),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    http_request: Request = None
+):
     """
     Ingest brand assets and documents.
     
@@ -48,6 +54,19 @@ async def ingest(request: IngestRequest = Body(...)):
     ensure_collections_sync()
     
     ids: List[str] = []
+    # Idempotency: if present, check cached response
+    if idempotency_key:
+        try:
+            from ..services.redis import get_client
+            import hashlib, json as _json
+            cache = get_client()
+            body_hash = hashlib.sha256(_json.dumps(request.model_dump(), sort_keys=True).encode("utf-8")).hexdigest()
+            idem_key = f"idemp:ingest:{idempotency_key}:{request.project_id}:{body_hash}"
+            prev = cache.get(idem_key)
+            if prev:
+                return IngestResponse(**_json.loads(prev))
+        except Exception:
+            pass
     vectors: List[List[float]] = []
     payloads: List[dict] = []
     
@@ -73,6 +92,20 @@ async def ingest(request: IngestRequest = Body(...)):
                             raise HTTPException(status_code=400, detail={"error": "forbidden_host", "message": f"Host {u.hostname} not allowed"})
                         # Use URL literal as content
                         content = asset_ref.encode("utf-8")
+                    
+                    # Security scan the content
+                    with trace.span("security_scan"):
+                        scan_result = scan_upload(content, filename=asset_ref)
+                        
+                        # If it's an image and EXIF was not already removed, strip it
+                        if scan_result.get("actual_mime", "").startswith("image/") and not scan_result.get("exif_removed"):
+                            content = strip_exif_from_image(content)
+                            trace.log("EXIF metadata stripped from image")
+                    
+                    # Promote from quarantine to public after successful scan
+                    if asset_ref.startswith("quarantine/"):
+                        public_key = promote_quarantine_to_public(asset_ref)
+                        trace.log(f"Asset promoted from quarantine to {public_key}")
                     
                     # Try Document AI first if it's a document
                     text_blocks = []
@@ -125,7 +158,8 @@ async def ingest(request: IngestRequest = Body(...)):
     processed = 0
     if ids:
         with trace.span("qdrant_upsert", {"count": len(ids)}):
-            await upsert_vectors(ids, vectors, payloads)
+            headers = dict(request.headers)
+            await upsert_vectors(ids, vectors, payloads, headers=headers)
             processed = len(ids)
     
     # Try to extract canon from the ingested documents
@@ -145,11 +179,18 @@ async def ingest(request: IngestRequest = Body(...)):
     
     await trace.flush()
     
-    return IngestResponse(processed=processed, qdrant_ids=ids)
+    resp = IngestResponse(processed=processed, qdrant_ids=ids)
+    if idempotency_key:
+        try:
+            cache.setex(idem_key, 86400, json.dumps(resp.model_dump()))
+        except Exception:
+            pass
+    return resp
 
 
 @router.post("/ingest/file")
 async def ingest_file(
+    request: Request,
     project_id: str = Form(...),
     file: UploadFile = File(...)
 ):
@@ -165,8 +206,9 @@ async def ingest_file(
     sanitizer = InputSanitizer(mode="strict")
     safe_project_id = sanitizer.sanitize(project_id)
     safe_filename = sanitizer.sanitize(file.filename)
-    quarantine_key = f"quarantine/{safe_project_id}/{uuid.uuid4()}_{safe_filename}"
-    put_object(quarantine_key, content, content_type=file.content_type or "application/octet-stream")
+    headers = dict(request.headers)
+    org_id = extract_org_id_from_request_headers(headers, fallback=safe_project_id)
+    quarantine_key = put_quarantine(safe_project_id, safe_filename, content, content_type=file.content_type or "application/octet-stream", org_id=org_id)
     
     # Process using main ingest endpoint
     request = IngestRequest(project_id=safe_project_id, assets=[quarantine_key])

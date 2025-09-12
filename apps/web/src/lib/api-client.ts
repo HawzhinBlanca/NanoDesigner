@@ -76,8 +76,9 @@ export interface APIClientConfig {
 }
 
 const DEFAULT_CONFIG: Required<APIClientConfig> = {
+  // Default to API dev port; in production, require explicit NEXT_PUBLIC_API_BASE
   baseURL: process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000',
-  timeout: 30000,
+  timeout: 60000, // Increased to 60 seconds for generation requests
   retryAttempts: 3,
   retryDelay: 1000,
   authTokenProvider: async () => null,
@@ -91,6 +92,10 @@ class NanoDesignerAPIClient {
 
   constructor(config: APIClientConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    // Guard: baseURL must be set in production
+    if (process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_API_BASE) {
+      throw new Error('NEXT_PUBLIC_API_BASE must be set in production');
+    }
   }
 
   /**
@@ -105,7 +110,8 @@ class NanoDesignerAPIClient {
    */
   private async request<T>(
     endpoint: string,
-    init: RequestInit = {}
+    init: RequestInit = {},
+    options?: { signal?: AbortSignal }
   ): Promise<T> {
     const url = `${this.config.baseURL}${endpoint}`;
     
@@ -115,15 +121,27 @@ class NanoDesignerAPIClient {
       'Content-Type': 'application/json',
       ...((init.headers as Record<string, string>) || {}),
     };
+    // Add Idempotency-Key automatically for POST requests if not provided
+    if ((init.method || 'GET').toUpperCase() === 'POST' && !headers['Idempotency-Key']) {
+      const entropy = `${endpoint}:${Date.now()}:${Math.random()}`;
+      // Lightweight, sufficient for retry-dedupe scope
+      headers['Idempotency-Key'] = typeof btoa === 'function' ? btoa(entropy) : Buffer.from(entropy).toString('base64');
+    }
+
     
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
 
+    // Combine timeout signal with optional abort signal
+    const timeoutSignal = AbortSignal.timeout(this.config.timeout);
+    const signals = [timeoutSignal];
+    if (options?.signal) signals.push(options.signal);
+    
     const requestInit: RequestInit = {
       ...init,
       headers,
-      signal: AbortSignal.timeout(this.config.timeout),
+      signal: signals.length > 1 ? AbortSignal.any(signals) : timeoutSignal,
     };
 
     // Log request
@@ -174,9 +192,11 @@ class NanoDesignerAPIClient {
         }
       }
 
-      // Wait before retry (exponential backoff)
+      // Wait before retry (exponential backoff with jitter and UI-friendly cap)
       if (attempt < this.config.retryAttempts) {
-        const delay = this.config.retryDelay * Math.pow(2, attempt);
+        const baseDelay = this.config.retryDelay * Math.pow(2, attempt);
+        const jitter = Math.random() * 1000;
+        const delay = Math.min(baseDelay + jitter, 5000); // Cap at 5 seconds for better UX
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -225,28 +245,29 @@ class NanoDesignerAPIClient {
   /**
    * Generate graphic designs using AI
    */
-  async render(request: RenderRequest): Promise<RenderResponse> {
+  async render(request: RenderRequest, options?: { signal?: AbortSignal }): Promise<RenderResponse> {
+    // Always use real backend endpoint
     return this.request<RenderResponse>('/render', {
       method: 'POST',
       body: JSON.stringify(request),
-    });
+    }, options);
   }
 
   /**
    * Start asynchronous rendering job
    */
-  async renderAsync(request: RenderRequest): Promise<{ job_id: string }> {
+  async renderAsync(request: RenderRequest, options?: { signal?: AbortSignal }): Promise<{ job_id: string }> {
     return this.request<{ job_id: string }>('/render/async', {
       method: 'POST',
       body: JSON.stringify(request),
-    });
+    }, options);
   }
 
   /**
    * Get status of asynchronous rendering job
    */
-  async getJobStatus(jobId: string): Promise<any> {
-    return this.request(`/render/jobs/${jobId}`);
+  async getJobStatus(jobId: string, options?: { signal?: AbortSignal }): Promise<any> {
+    return this.request(`/render/jobs/${jobId}`, {}, options);
   }
 
   /**
@@ -305,26 +326,35 @@ class NanoDesignerAPIClient {
 // Default client instance
 export const apiClient = new NanoDesignerAPIClient({
   onError: (error) => {
-    console.error('API Error:', {
-      status: error.status,
-      message: error.message,
-      traceId: error.traceId,
-      details: error.error.details,
-    });
+    // API error occurred - could be logged to monitoring service
+    if (process.env.NODE_ENV === 'development') {
+      console.error('API Error:', {
+        status: error.status,
+        message: error.message,
+        traceId: error.traceId,
+        details: error.error.details,
+      });
+    }
   },
   onRequest: (url, init) => {
-    console.log('API Request:', {
-      method: init.method || 'GET',
-      url,
-      hasAuth: !!(init.headers as any)?.Authorization,
-    });
+    // API request initiated - could be used for analytics
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Request:', {
+        method: init.method || 'GET',
+        url,
+        hasAuth: !!(init.headers as any)?.Authorization,
+      });
+    }
   },
   onResponse: (url, response) => {
-    console.log('API Response:', {
-      url,
-      status: response.status,
-      ok: response.ok,
-    });
+    // API response received - could be used for monitoring
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Response:', {
+        url,
+        status: response.status,
+        ok: response.ok,
+      });
+    }
   },
 });
 

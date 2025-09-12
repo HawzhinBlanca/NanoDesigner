@@ -1,7 +1,7 @@
 """Unit tests for Redis caching service."""
 
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, ANY
 import pytest
 
 from app.services.redis import (
@@ -47,26 +47,38 @@ class TestRedisService:
         assert isinstance(key2, str)
         assert key1 != key2
 
-    @patch('app.services.redis.redis.from_url')
-    def test_get_client_success(self, mock_from_url):
+    @patch('app.services.redis.redis.Redis')
+    @patch('app.services.redis.ConnectionPool.from_url')
+    def test_get_client_success(self, mock_pool_from_url, mock_redis):
         """Test successful Redis client creation."""
+        mock_pool = Mock()
         mock_client = Mock()
-        mock_from_url.return_value = mock_client
+        mock_pool_from_url.return_value = mock_pool
+        mock_redis.return_value = mock_client
         
         with patch('app.services.redis.settings') as mock_settings:
             mock_settings.redis_url = "redis://localhost:6379/0"
             
-            # Clear the global client to test initialization
+            # Clear the global pool to test initialization
             import app.services.redis
-            app.services.redis._client = None
+            app.services.redis._pool = None
             
             client = get_client()
             
             assert client == mock_client
-            mock_from_url.assert_called_once_with(
-                "redis://localhost:6379/0", 
-                decode_responses=False
+            mock_pool_from_url.assert_called_once_with(
+                "redis://localhost:6379/0",
+                max_connections=100,
+                retry_on_timeout=True,
+                retry_on_error=ANY,
+                health_check_interval=30,
+                decode_responses=False,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                socket_keepalive=True,
+                socket_keepalive_options={}
             )
+            mock_redis.assert_called_once_with(connection_pool=mock_pool)
 
     def test_cache_get_set_cache_hit(self):
         """Test cache_get_set when value exists in cache."""

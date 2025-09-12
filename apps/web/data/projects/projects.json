@@ -1,0 +1,141 @@
+[
+  {
+    "id": "6b91653b-7504-4e5a-b426-697f9965a3db",
+    "name": "Test E2E Project",
+    "description": "Testing real project creation",
+    "industry": "Technology",
+    "brandGuidelines": "Modern and clean design",
+    "createdAt": "2025-09-07T20:02:43.586Z",
+    "updatedAt": "2025-09-08T10:29:22.335Z",
+    "assets": [
+      {
+        "id": "d47c5bf8-f0d5-4962-9f1d-9aa67e5d4e82",
+        "fileName": "test-file.txt",
+        "storedFileName": "689ffac2-a088-40ef-98ea-ef127a8eb5bc.txt",
+        "fileSize": 34,
+        "fileType": "text/plain",
+        "url": "/uploads/6b91653b-7504-4e5a-b426-697f9965a3db/689ffac2-a088-40ef-98ea-ef127a8eb5bc.txt",
+        "uploadedAt": "2025-09-07T20:03:57.161Z"
+      },
+      {
+        "id": "7358d5a0-35d1-41b5-b9a8-f7e74badd0d0",
+        "fileName": "test-authenticity.txt",
+        "storedFileName": "214652ad-e60f-4a76-9c51-0cf241ddfc68.txt",
+        "fileSize": 46,
+        "fileType": "text/plain",
+        "url": "/uploads/6b91653b-7504-4e5a-b426-697f9965a3db/214652ad-e60f-4a76-9c51-0cf241ddfc68.txt",
+        "uploadedAt": "2025-09-07T21:27:34.057Z"
+      },
+      {
+        "id": "3928001d-986c-4a02-a532-6a9df5b8a40d",
+        "fileName": "final-test.txt",
+        "storedFileName": "77fb97d1-0403-498c-96d9-9ace27c9f020.txt",
+        "fileSize": 29,
+        "fileType": "text/plain",
+        "url": "/uploads/6b91653b-7504-4e5a-b426-697f9965a3db/77fb97d1-0403-498c-96d9-9ace27c9f020.txt",
+        "uploadedAt": "2025-09-08T10:29:22.335Z"
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "id": "a121f32e-5d14-446b-9520-91756fe9abd1",
+    "name": "My Real Project",
+    "description": "This is a real persisted project",
+    "industry": "Design",
+    "brandGuidelines": "Professional and modern",
+    "createdAt": "2025-09-07T20:18:36.851Z",
+    "updatedAt": "2025-09-07T20:18:36.851Z",
+    "assets": [],
+    "status": "active"
+  },
+  {
+    "id": "47f1b812-84fa-42e1-9b3c-03cc8d311d01",
+    "name": "Brutal Reality Check Project",
+    "description": "",
+    "industry": "",
+    "brandGuidelines": "",
+    "createdAt": "2025-09-08T11:26:05.603Z",
+    "updatedAt": "2025-09-08T11:27:08.763Z",
+    "assets": [
+      {
+        "id": "f6201dab-1763-43d2-82c9-0fc8320e24b7",
+        "fileName": "test-image.png",
+        "storedFileName": "54da70c0-7032-4747-a6d8-b23cb1f9dc76.png",
+        "fileSize": 426,
+        "fileType": "image/png",
+        "url": "/uploads/47f1b812-84fa-42e1-9b3c-03cc8d311d01/54da70c0-7032-4747-a6d8-b23cb1f9dc76.png",
+        "uploadedAt": "2025-09-08T11:27:08.763Z"
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "id": "ef7a97a7-581c-4004-8747-40a12e23fe4b",
+    "name": "Test Project From API",
+    "description": "Testing real project creation",
+    "industry": "Tech",
+    "brandGuidelines": "Modern design",
+    "createdAt": "2025-09-08T12:36:07.397Z",
+    "updatedAt": "2025-09-08T12:59:24.169Z",
+    "assets": [
+      {
+        "id": "01a90388-a6cf-49b3-9253-87532defea59",
+        "fileName": "test-upload.txt",
+        "storedFileName": "57924f31-0874-48e4-b8e4-5bd265a381c4.txt",
+        "fileSize": 31,
+        "fileType": "text/plain",
+        "url": "/uploads/ef7a97a7-581c-4004-8747-40a12e23fe4b/57924f31-0874-48e4-b8e4-5bd265a381c4.txt",
+        "uploadedAt": "2025-09-08T12:59:24.169Z"
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "id": "hawzhin-project",
+    "name": "Hawzhin",
+    "description": "Personal brand project for Hawzhin",
+    "industry": "Technology / Personal Brand",
+    "brandGuidelines": "Modern, professional, innovative tech aesthetic",
+    "createdAt": "2025-09-11T10:00:00.000Z",
+    "updatedAt": "2025-09-11T10:00:00.000Z",
+    "assets": [],
+    "status": "active",
+    "owner": "hawzhin"
+  },
+  {
+    "id": "kaae",
+    "name": "KAAE",
+    "description": "KAAE Technology Company - Innovation & Trust",
+    "industry": "Technology",
+    "brandGuidelines": "Minimalist geometric design with deep blue (#003366), black, and silver accents. Professional, innovative, trustworthy brand identity with sharp lines and modern typography.",
+    "createdAt": "2025-09-11T10:00:00.000Z",
+    "updatedAt": "2025-09-11T11:00:00.000Z",
+    "assets": [
+      {
+        "id": "kaae-logo-svg",
+        "fileName": "kaae_logo.svg",
+        "storedFileName": "kaae_logo.svg",
+        "fileSize": 2000,
+        "fileType": "image/svg+xml",
+        "url": "/api/assets/kaae_logo.svg",
+        "uploadedAt": "2025-09-11T11:00:15.000Z"
+      }
+    ],
+    "status": "active",
+    "owner": "hawzhin",
+    "canon": {
+      "colors": {
+        "primary": "#003366",
+        "secondary": "#000000",
+        "accent": "#C0C0C0"
+      },
+      "fonts": {
+        "heading": "Arial, sans-serif",
+        "body": "Arial, sans-serif"
+      },
+      "tone": ["Professional", "Innovative", "Trustworthy", "Modern", "Sophisticated", "Tech-forward"],
+      "style": ["Minimalist", "Geometric", "Clean lines", "Sharp edges", "Negative space utilization"]
+    }
+  }
+]

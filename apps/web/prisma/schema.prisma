@@ -1,0 +1,238 @@
+// NanoDesigner Production Database Schema
+// Secure, multi-tenant database design with proper relationships
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication (integrates with Clerk)
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique // Clerk user ID
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  projects Project[]
+  assets   Asset[]
+  renders  Render[]
+  canons   Canon[]
+  organizationMembers OrganizationMember[]
+  
+  @@map("users")
+}
+
+// Organization model for multi-tenancy
+model Organization {
+  id          String   @id @default(cuid())
+  clerkOrgId  String   @unique // Clerk organization ID
+  name        String
+  slug        String   @unique
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  projects Project[]
+  members  OrganizationMember[]
+  
+  @@map("organizations")
+}
+
+// Organization membership for RBAC
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MemberRole   @default(MEMBER)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Relationships
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@map("organization_members")
+}
+
+// Project model - main entity
+model Project {
+  id               String       @id @default(cuid())
+  name             String
+  description      String?
+  industry         String?
+  brandGuidelines  String?
+  status           ProjectStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  
+  // Multi-tenant fields
+  userId           String       // Project owner
+  organizationId   String?      // Optional organization
+  
+  // Relationships
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  assets       Asset[]
+  renders      Render[]
+  canons       Canon[]
+  
+  // Security indexes
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("projects")
+}
+
+// Asset model - secure file storage
+model Asset {
+  id               String    @id @default(cuid())
+  fileName         String    // Original filename
+  storedFileName   String    @unique // Secure stored filename
+  fileSize         Int
+  fileType         String
+  mimeType         String
+  url              String    // Public URL or path
+  secureUrl        String?   // Signed URL for private assets
+  checksum         String?   // File integrity check
+  uploadedAt       DateTime  @default(now())
+  
+  // Security fields
+  isPublic         Boolean   @default(false)
+  scanStatus       ScanStatus @default(PENDING)
+  scanResult       String?   // Security scan results
+  
+  // Multi-tenant fields
+  userId           String
+  projectId        String
+  organizationId   String?
+  
+  // Relationships
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Security indexes
+  @@index([userId])
+  @@index([projectId])
+  @@index([scanStatus])
+  @@index([uploadedAt])
+  @@map("assets")
+}
+
+// Render model - AI generation results
+model Render {
+  id           String      @id @default(cuid())
+  prompt       String
+  model        String      // AI model used
+  parameters   Json?       // Generation parameters
+  status       RenderStatus @default(PENDING)
+  resultUrl    String?
+  resultData   Json?       // Metadata about result
+  cost         Float?      // Cost in USD
+  duration     Int?        // Duration in milliseconds
+  errorMessage String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  // Multi-tenant fields
+  userId       String
+  projectId    String
+  
+  // Relationships
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Performance indexes
+  @@index([userId])
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("renders")
+}
+
+// Canon model - brand guidelines
+model Canon {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  data        Json     // Canon data (colors, fonts, etc.)
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Multi-tenant fields
+  userId      String
+  projectId   String
+  
+  // Relationships
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([projectId])
+  @@index([isActive])
+  @@map("canons")
+}
+
+// Audit log for security and compliance
+model AuditLog {
+  id           String    @id @default(cuid())
+  action       String    // Action performed
+  entityType   String    // Type of entity (Project, Asset, etc.)
+  entityId     String    // ID of entity
+  oldValues    Json?     // Previous values
+  newValues    Json?     // New values
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  
+  // Multi-tenant fields
+  userId       String?
+  
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// Enums
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum ScanStatus {
+  PENDING
+  SCANNING
+  CLEAN
+  INFECTED
+  ERROR
+}
+
+enum RenderStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}

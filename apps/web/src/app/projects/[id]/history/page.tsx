@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
-import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs";
+// import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs";
 import { 
   Search, 
   Filter, 
@@ -51,126 +51,12 @@ interface RenderHistory {
   tags: string[];
 }
 
-// Mock data
-const mockHistory: RenderHistory[] = [
-  {
-    id: '1',
-    synthId: 'SYNTH_001_ABC',
-    name: 'Protein Structure Analysis v1',
-    status: 'completed',
-    cost: 12.50,
-    timestamp: new Date('2024-01-15T10:30:00'),
-    duration: 125000,
-    preview: '/api/placeholder/300/200',
-    metadata: {
-      resolution: '1024x1024',
-      format: 'PNG',
-      quality: 'High',
-      samples: 1000
-    },
-    constraints: {
-      maxIterations: 500,
-      convergenceThreshold: 0.001,
-      memoryLimit: '8GB',
-      gpuType: 'A100'
-    },
-    tags: ['protein', 'analysis', 'v1']
-  },
-  {
-    id: '2',
-    synthId: 'SYNTH_002_DEF',
-    name: 'Molecular Dynamics Simulation',
-    status: 'failed',
-    cost: 8.75,
-    timestamp: new Date('2024-01-14T15:45:00'),
-    duration: 85000,
-    preview: '/api/placeholder/300/200',
-    metadata: {
-      resolution: '2048x2048',
-      format: 'TIFF',
-      quality: 'Ultra',
-      samples: 2000
-    },
-    constraints: {
-      maxIterations: 1000,
-      convergenceThreshold: 0.0001,
-      memoryLimit: '16GB',
-      gpuType: 'V100'
-    },
-    tags: ['molecular', 'dynamics', 'failed']
-  },
-  {
-    id: '3',
-    synthId: 'SYNTH_003_GHI',
-    name: 'Nano Structure Visualization',
-    status: 'in-progress',
-    cost: 15.25,
-    timestamp: new Date('2024-01-16T09:15:00'),
-    duration: 45000,
-    preview: '/api/placeholder/300/200',
-    metadata: {
-      resolution: '512x512',
-      format: 'PNG',
-      quality: 'Medium',
-      samples: 500
-    },
-    constraints: {
-      maxIterations: 300,
-      convergenceThreshold: 0.01,
-      memoryLimit: '4GB',
-      gpuType: 'RTX4090'
-    },
-    tags: ['nano', 'visualization']
-  },
-  {
-    id: '4',
-    synthId: 'SYNTH_004_JKL',
-    name: 'Crystal Lattice Render',
-    status: 'completed',
-    cost: 22.80,
-    timestamp: new Date('2024-01-13T14:20:00'),
-    duration: 180000,
-    preview: '/api/placeholder/300/200',
-    metadata: {
-      resolution: '4096x4096',
-      format: 'EXR',
-      quality: 'Ultra',
-      samples: 5000
-    },
-    constraints: {
-      maxIterations: 800,
-      convergenceThreshold: 0.0005,
-      memoryLimit: '32GB',
-      gpuType: 'A100'
-    },
-    tags: ['crystal', 'lattice', 'high-res']
-  },
-  {
-    id: '5',
-    synthId: 'SYNTH_005_MNO',
-    name: 'DNA Helix Animation',
-    status: 'queued',
-    cost: 18.90,
-    timestamp: new Date('2024-01-17T11:00:00'),
-    duration: 0,
-    preview: '/api/placeholder/300/200',
-    metadata: {
-      resolution: '1920x1080',
-      format: 'MP4',
-      quality: 'High',
-      samples: 1500
-    },
-    constraints: {
-      maxIterations: 600,
-      convergenceThreshold: 0.002,
-      memoryLimit: '12GB',
-      gpuType: 'RTX4080'
-    },
-    tags: ['dna', 'animation', 'biology']
-  }
-];
+// Real API integration - no more mock data
+import { useProjectHistory, downloadRenderAsset, shareRender } from './api-integration';
+import { useAuth } from '@clerk/nextjs';
 
-export default function HistoryPage() {
+export default function HistoryPage({ params }: { params: { id: string } }) {
+  const { getToken } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -181,9 +67,12 @@ export default function HistoryPage() {
   const [sortBy, setSortBy] = useState<'timestamp' | 'cost' | 'duration'>('timestamp');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
+  // Real data from API
+  const { history, loading, error, total, refetch } = useProjectHistory(params.id);
+
   // Filtered and sorted data
   const filteredHistory = useMemo(() => {
-    let filtered = mockHistory.filter((item) => {
+    let filtered = history.filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           item.synthId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           item.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -261,25 +150,60 @@ export default function HistoryPage() {
     return `${seconds}s`;
   };
 
-  const handleDownload = (item: RenderHistory) => {
-    console.log('Downloading:', item.synthId);
+  const handleDownload = async (item: RenderHistory) => {
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      await downloadRenderAsset(item.id, token);
+    } catch (error) {
+      console.error('Download failed:', error);
+      // Show error toast/notification
+    }
   };
 
-  const handleShare = (item: RenderHistory) => {
-    navigator.clipboard.writeText(`${window.location.origin}/render/${item.id}`);
+  const handleShare = async (item: RenderHistory) => {
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      const shareUrl = await shareRender(item.id, token);
+      await navigator.clipboard.writeText(shareUrl);
+      // Show success toast/notification
+    } catch (error) {
+      console.error('Share failed:', error);
+      // Show error toast/notification
+    }
   };
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
   };
 
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p>Loading render history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="text-center text-red-500">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4" />
+          <h3 className="text-lg font-medium mb-2">Error Loading History</h3>
+          <p className="mb-4">{error}</p>
+          <Button onClick={() => refetch()}>Try Again</Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
-      <SignedOut>
-        <p className="text-sm">Please sign in to access History.</p>
-        <SignInButton />
-      </SignedOut>
-      <SignedIn>
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -595,7 +519,6 @@ export default function HistoryPage() {
           </Button>
         </div>
       )}
-    </SignedIn>
     </div>
   );
 }

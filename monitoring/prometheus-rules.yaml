@@ -1,0 +1,195 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+data:
+  nanodesigner.rules.yaml: |
+    groups:
+    - name: nanodesigner_api
+      interval: 30s
+      rules:
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{app="nanodesigner-api",status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{app="nanodesigner-api"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "High error rate on {{ $labels.instance }}"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+          runbook_url: "https://wiki.internal/runbooks/high-error-rate"
+      
+      # High Latency
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{app="nanodesigner-api"}[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High latency detected"
+          description: "95th percentile latency is {{ $value }}s"
+      
+      # Pod Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            container_memory_working_set_bytes{pod=~"nanodesigner-api-.*"}
+            / 
+            container_spec_memory_limit_bytes{pod=~"nanodesigner-api-.*"}
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Pod {{ $labels.pod }} high memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+      
+      # Database Connection Pool Exhaustion
+      - alert: DatabasePoolExhaustion
+        expr: |
+          database_pool_connections_in_use{app="nanodesigner-api"} 
+          / 
+          database_pool_size{app="nanodesigner-api"} > 0.9
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "{{ $value | humanizePercentage }} of connections in use"
+      
+      # Circuit Breaker Open
+      - alert: CircuitBreakerOpen
+        expr: |
+          circuit_breaker_state{app="nanodesigner-api",state="open"} == 1
+        for: 1m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Circuit breaker {{ $labels.name }} is open"
+          description: "Circuit breaker has been open for {{ $labels.name }} service"
+      
+      # Redis Connection Issues
+      - alert: RedisConnectionFailure
+        expr: |
+          up{job="redis",app="nanodesigner"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Redis connection failure"
+          description: "Cannot connect to Redis instance"
+      
+      # S3/R2 Storage Issues
+      - alert: StorageOperationFailures
+        expr: |
+          rate(storage_operation_failures_total{app="nanodesigner-api"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High storage operation failure rate"
+          description: "Storage failures: {{ $value }} per second"
+      
+      # OpenRouter API Failures
+      - alert: OpenRouterAPIFailures
+        expr: |
+          rate(openrouter_api_errors_total{app="nanodesigner-api"}[5m]) > 0.5
+        for: 3m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "OpenRouter API experiencing failures"
+          description: "OpenRouter error rate: {{ $value }} per second"
+      
+      # Render Job Queue Backlog
+      - alert: RenderQueueBacklog
+        expr: |
+          render_queue_pending_jobs{app="nanodesigner-api"} > 100
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Render queue backlog growing"
+          description: "{{ $value }} jobs pending in render queue"
+      
+      # Pod Restart Rate
+      - alert: HighPodRestartRate
+        expr: |
+          rate(kube_pod_container_status_restarts_total{pod=~"nanodesigner-api-.*"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Pod {{ $labels.pod }} restarting frequently"
+          description: "Pod has restarted {{ $value }} times in the last 15 minutes"
+      
+      # Disk Space
+      - alert: LowDiskSpace
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/"}
+            /
+            node_filesystem_size_bytes{mountpoint="/"}
+          ) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Only {{ $value | humanizePercentage }} disk space remaining"
+      
+      # Certificate Expiry
+      - alert: CertificateExpiringSoon
+        expr: |
+          cert_expiry_timestamp_seconds - time() < 7 * 24 * 60 * 60
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Certificate expiring soon"
+          description: "Certificate expires in {{ $value | humanizeDuration }}"
+      
+      # Rate Limiting
+      - alert: HighRateLimitRejections
+        expr: |
+          rate(rate_limit_rejections_total{app="nanodesigner-api"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High rate limit rejection rate"
+          description: "{{ $value }} requests per second being rate limited"
+      
+      # Cost Tracking
+      - alert: HighAPIUsageCost
+        expr: |
+          increase(api_usage_cost_usd_total{app="nanodesigner-api"}[1h]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High API usage cost detected"
+          description: "API usage cost in last hour: ${{ $value }}"

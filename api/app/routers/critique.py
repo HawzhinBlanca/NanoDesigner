@@ -47,24 +47,32 @@ async def critique(request: CritiqueRequest = Body(...)):
         canon_bytes = cache_get_set(canon_key, _canon_factory, ttl=86400)
         canon = json.loads(canon_bytes.decode("utf-8"))
     
-    # Fetch asset information
+    # Fetch asset information (OPTIMIZED: Batch processing)
     assets_info = []
     with trace.span("fetch_assets"):
-        for asset_id in asset_ids[:10]:  # Limit to 10 assets
-            # If it's an R2 key, get metadata
-            if "/" in asset_id:
-                try:
-                    # Generate signed URL for reference
-                    url = signed_public_url(asset_id, expires_seconds=300)
-                    assets_info.append({
-                        "id": asset_id,
-                        "url": url,
-                        "type": "image" if any(asset_id.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]) else "document"
-                    })
-                except Exception as e:
-                    trace.log(f"Failed to process asset {asset_id}: {e}")
-            else:
-                assets_info.append({"id": asset_id, "type": "reference"})
+        # Limit to 10 assets and batch process
+        limited_asset_ids = asset_ids[:10]
+        
+        # Separate R2 keys from references for batch processing
+        r2_assets = [aid for aid in limited_asset_ids if "/" in aid]
+        reference_assets = [aid for aid in limited_asset_ids if "/" not in aid]
+        
+        # Batch generate signed URLs for R2 assets
+        for asset_id in r2_assets:
+            try:
+                # Generate signed URL for reference
+                url = signed_public_url(asset_id, expires_seconds=300)
+                assets_info.append({
+                    "id": asset_id,
+                    "url": url,
+                    "type": "image" if any(asset_id.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]) else "document"
+                })
+            except Exception as e:
+                trace.log(f"Failed to process asset {asset_id}: {e}")
+        
+        # Batch add reference assets
+        for asset_id in reference_assets:
+            assets_info.append({"id": asset_id, "type": "reference"})
     
     # Prepare critique prompt
     critique_prompt = {
@@ -105,17 +113,8 @@ async def critique(request: CritiqueRequest = Body(...)):
                 "repair_suggestions": ["Review asset manually"]
             }
     
-    # Validate with Guardrails
-    try:
-        validate_contract("critique.json", critique_result)
-    except Exception as e:
-        # If validation fails, use a safe default
-        trace.log(f"Guardrails validation failed: {e}")
-        critique_result = {
-            "score": 0.5,
-            "violations": ["Guardrails validation failed"],
-            "repair_suggestions": ["Review asset manually"]
-        }
+    # Validate with Guardrails - strictly reject on failure per blueprint
+    validate_contract("critique.json", critique_result)
     
     await trace.flush()
     

@@ -4,7 +4,7 @@ End-to-end FastAPI service implementing the AGENTS.md spec: `/render`, `/ingest`
 
 Quick start
 - Copy `.env.example` to `.env` and set required keys (OpenRouter, R2, etc.).
-- Run `docker compose up -d redis qdrant postgres langfuse kong`.
+- Run `docker compose up -d redis qdrant postgres langfuse kong jaeger`.
 - `cd api && poetry install && poetry run uvicorn app.main:app --reload`.
 - Try requests in `examples/curl.http`.
 - Optional local storage: `docker compose up -d minio` then set in `.env`:
@@ -16,6 +16,19 @@ Notes
 - `/render` calls OpenRouter Gemini 2.5 Flash Image and stores outputs in S3-compatible storage (R2 in prod; MinIO locally).
 - Guardrails JSON schemas live in `guardrails/` and are enforced on plan/canon/critique.
 - OpenAPI is in `api/openapi.yaml`.
+- Grafana: import `docs/grafana/sgd-dashboard.json` and point to your Prometheus scraping the API `/metrics`.
+ - Tracing (OTEL/Jaeger): open Jaeger UI at http://localhost:16686 and search for service `sgd-api`. The API sets `Traceparent` header when OTEL is enabled; dev compose points OTLP to `jaeger:4318`.
+
+## Make targets
+
+Common workflows are scripted in the `Makefile`:
+- `make up` / `make down`: start/stop infra (Redis, Qdrant, Postgres, Langfuse, Kong, MinIO)
+- `make api`: run FastAPI locally with reload
+- `make web`: run Next.js dev server
+- `make test`: run API unit tests (no externals)
+- `make fe-test`: run frontend unit tests
+- `make e2e-smoke`: quick API smoke (health, metrics, render)
+- `make lhci-smoke`: Lighthouse CI run (requires web running)
 
 ## Frontend (apps/web)
 
@@ -25,7 +38,7 @@ Notes
 
 ### Env
 
-Create `apps/web/.env.local`:
+Create `apps/web/.env.local` (see `apps/web/.env.local.example`):
 
 ```
 NEXT_PUBLIC_API_BASE=http://localhost:8000
@@ -47,3 +60,9 @@ Flags default in `FlagsProvider`:
 - Initial JS ≤ 200KB (size guard)
 - E2E smoke green; no new critical issues
 - Visual diffs approved
+
+## Security
+
+- Never commit `.env` or `.env.local`. Examples are provided as `*.example` files.
+- If a secret is accidentally committed, rotate it immediately and purge from history.
+- OpenRouter attribution headers are set from `SERVICE_BASE_URL` or `OPENROUTER_HTTP_REFERER`.

@@ -49,15 +49,6 @@ def signed_public_url(key: str, expires_seconds: int = 900) -> str:
     return presign_get_url(key, expires_seconds)
 
 
-def get_object(key: str) -> bytes | None:
-    s3 = _s3_client()
-    try:
-        resp = s3.get_object(Bucket=settings.r2_bucket, Key=key)
-        return resp["Body"].read()
-    except Exception:
-        return None
-
-
 def get_object(key: str) -> Optional[bytes]:
     """
     Retrieve an object from R2/S3 storage.

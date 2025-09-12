@@ -1,0 +1,116 @@
+{
+  "organization": "Kurdistan Accrediting Association for Education (KAAE)",
+  "palette_hex": [
+    "#4770A3",
+    "#F7B500",
+    "#0A1628",
+    "#1E3A5F",
+    "#2C5282",
+    "#4A90E2",
+    "#FDF8F3",
+    "#FFD700"
+  ],
+  "primary_colors": {
+    "kaae_blue": {
+      "hex": "#4770A3",
+      "rgb": "71, 112, 163",
+      "cmyk": "56, 31, 0, 36",
+      "pantone": "5415 C"
+    },
+    "kaae_gold": {
+      "hex": "#F7B500",
+      "rgb": "247, 181, 0",
+      "cmyk": "0, 27, 100, 3",
+      "pantone": "7549 C"
+    }
+  },
+  "extended_colors": {
+    "midnight": {
+      "hex": "#0A1628",
+      "rgb": "10, 22, 40",
+      "cmyk": "75, 45, 0, 84"
+    },
+    "royal": {
+      "hex": "#1E3A5F",
+      "rgb": "30, 58, 95",
+      "cmyk": "68, 39, 0, 63"
+    },
+    "ocean": {
+      "hex": "#2C5282",
+      "rgb": "44, 82, 130",
+      "cmyk": "66, 37, 0, 49"
+    },
+    "sky": {
+      "hex": "#4A90E2",
+      "rgb": "74, 144, 226",
+      "cmyk": "67, 36, 0, 11"
+    },
+    "cream": {
+      "hex": "#FDF8F3",
+      "rgb": "253, 248, 243",
+      "cmyk": "0, 2, 4, 1"
+    },
+    "sun": {
+      "hex": "#FFD700",
+      "rgb": "255, 215, 0",
+      "cmyk": "0, 16, 100, 0"
+    }
+  },
+  "fonts": [
+    "Verdana",
+    "Noto Sans Arabic"
+  ],
+  "typography": {
+    "english": {
+      "primary": "Verdana",
+      "weights": ["Regular", "Bold"]
+    },
+    "arabic_kurdish": {
+      "primary": "Noto Sans Arabic",
+      "weights": ["Regular", "Bold"],
+      "usage": "For Kurdish and Arabic text"
+    }
+  },
+  "voice": {
+    "tone": "professional, authoritative, educational",
+    "dos": [
+      "Emphasize excellence and educational transformation",
+      "Use clear and accessible language",
+      "Maintain consistency across all materials",
+      "Respect the cultural heritage of Kurdistan",
+      "Project authority with elegance"
+    ],
+    "donts": [
+      "Never stretch or distort the logo",
+      "Never rotate or tilt the logo",
+      "Never add effects or shadows",
+      "Never change approved colors",
+      "Never use on busy backgrounds",
+      "Never recreate or trace the logo"
+    ]
+  },
+  "logo_elements": {
+    "sunburst": "21 rays symbolizing illumination and enlightenment",
+    "golden_core": "Represents excellence and achievement",
+    "circular_text": "Kurdistan Accrediting Association for Education",
+    "center_letter": "K for Kurdistan and KAAE",
+    "minimum_sizes": {
+      "print": "20mm",
+      "digital": "80px",
+      "favicon": "16px"
+    },
+    "clear_space": "Equal to height of the K letter"
+  },
+  "brand_values": {
+    "mission": "Establishing, organizing, and sustaining mechanisms for peer review and rigorous application of standards across education in Kurdistan Region of Iraq",
+    "vision": "To be an accreditor of choice to support, foster, and maintain quality assurance of education matching international best standards",
+    "established": "2022",
+    "status": "First independent accreditation body in Iraq"
+  },
+  "contact": {
+    "email": "info@kaae.krd",
+    "website": "www.kaae.org",
+    "phone": "+964 750 777 8888",
+    "address": "60m Street, Erbil, Kurdistan Region - Iraq"
+  }
+}

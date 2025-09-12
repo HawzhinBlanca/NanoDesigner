@@ -6,6 +6,7 @@ import json
 import uuid
 import hashlib
 import asyncio
+import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import redis.asyncio as redis
@@ -13,6 +14,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 
 from ..core.config import settings
 from ..services.langfuse import Trace
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitBreaker:
@@ -64,11 +67,23 @@ class RenderQueue:
         self.redis_url = settings.redis_url
         self.redis_client = None
         self.circuit_breaker = CircuitBreaker()
+        self._connection_lock = asyncio.Lock()
         
     async def connect(self):
-        """Connect to Redis"""
-        if not self.redis_client:
-            self.redis_client = await redis.from_url(self.redis_url, decode_responses=True)
+        """Connect to Redis with proper locking to prevent race conditions"""
+        async with self._connection_lock:
+            if not self.redis_client:
+                try:
+                    self.redis_client = await redis.from_url(
+                        self.redis_url, 
+                        decode_responses=True,
+                        retry_on_timeout=True,
+                        health_check_interval=30
+                    )
+                    logger.info("Redis async client connected")
+                except Exception as e:
+                    logger.error(f"Failed to connect to Redis: {e}")
+                    raise
             
     async def enqueue_render(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -311,14 +326,15 @@ class RenderWorker:
             
         # Generate preview via Gemini
         prompt = self._make_prompt_from_payload(preview_payload)
-        images = generate_images(prompt, n=1, size="512x512")
+        images = await generate_images(prompt, n=1, size="512x512")
         
         if not images:
             raise Exception("Failed to generate preview image")
             
         # Store preview image
         image_data, image_format = images[0]
-        preview_key = f"previews/{payload['project_id']}/{uuid.uuid4()}.{image_format}"
+        org_id = payload.get('org_id', 'anonymous')
+        preview_key = f"org/{org_id}/previews/{payload['project_id']}/{uuid.uuid4()}.{image_format}"
         
         put_object(
             preview_key, 
@@ -346,14 +362,15 @@ class RenderWorker:
         count = payload.get("outputs", {}).get("count", 1)
         dimensions = payload.get("outputs", {}).get("dimensions", "1024x1024")
         
-        images = generate_images(prompt, n=count, size=dimensions)
+        images = await generate_images(prompt, n=count, size=dimensions)
         
         if not images:
             raise Exception("Failed to generate final image")
             
         assets = []
         for i, (image_data, image_format) in enumerate(images):
-            final_key = f"renders/{payload['project_id']}/{uuid.uuid4()}.{image_format}"
+            org_id = payload.get('org_id', 'anonymous')
+            final_key = f"org/{org_id}/renders/{payload['project_id']}/{uuid.uuid4()}.{image_format}"
             
             put_object(
                 final_key,

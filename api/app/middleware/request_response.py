@@ -10,6 +10,7 @@ import json
 import time
 import logging
 import traceback
+from datetime import datetime
 from typing import Callable, Optional
 from uuid import uuid4
 
@@ -30,6 +31,7 @@ from ..models.exceptions import (
     ContentPolicyViolationException,
     ValidationError
 )
+from ..routers.prometheus import track_request as prom_track_request
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,11 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
             
         # Record start time
         start_time = time.time()
+        # Expose start time for handlers that want to surface processing time in body
+        try:
+            request.state._start_time = start_time
+        except Exception:
+            pass
         
         # Log incoming request
         if self.log_requests:
@@ -96,6 +103,21 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
                 request_id, 
                 processing_time_ms
             )
+
+            # Track metrics and record latency sample for p95 calculations
+            try:
+                prom_track_request(request.method, request.url.path, enhanced_response.status_code, processing_time_ms / 1000.0)
+                # Push latency to Redis zset for health p95; key 'latency_samples'
+                try:
+                    from ..services.redis import get_client as _get_client
+                    r = _get_client()
+                    r.zadd("latency_samples", {request.url.path: processing_time_ms})
+                    # Trim to last 10k samples
+                    r.zremrangebyrank("latency_samples", 0, -10001)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             
             # Log response
             if self.log_responses:
@@ -124,7 +146,7 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
                 exc_info=True
             )
             
-            return await self._create_error_response(
+            error_response = await self._create_error_response(
                 "Internal server error",
                 "INTERNAL_ERROR", 
                 "An unexpected error occurred while processing your request",
@@ -132,6 +154,12 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
                 processing_time_ms=processing_time_ms,
                 status_code=500
             )
+            # Track metrics for error
+            try:
+                prom_track_request(request.method, request.url.path, 500, processing_time_ms / 1000.0)
+            except Exception:
+                pass
+            return error_response
 
     async def _log_request(self, request: Request, request_id: str):
         """Log incoming request details."""
@@ -217,6 +245,17 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
         # Add standard headers
         if self.add_request_id:
             response.headers["X-Request-ID"] = request_id
+        # Add W3C trace context if available
+        try:
+            from opentelemetry import trace as _trace
+            span = _trace.get_current_span()
+            ctx = span.get_span_context() if span else None
+            if ctx and getattr(ctx, "trace_id", 0):
+                trace_id = f"{ctx.trace_id:032x}"
+                span_id = f"{ctx.span_id:016x}"
+                response.headers["Traceparent"] = f"00-{trace_id}-{span_id}-01"
+        except Exception:
+            pass
             
         if self.include_processing_time:
             response.headers["X-Processing-Time"] = f"{processing_time_ms}ms"
@@ -232,15 +271,24 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
                 # Parse existing response body
                 body = json.loads(response.body)
                 
-                # Add meta information if not present
-                if isinstance(body, dict) and 'meta' not in body:
-                    body['meta'] = {
-                        "request_id": request_id,
-                        "timestamp": time.time(),
-                        "version": "1.0.0",
-                        "processing_time_ms": processing_time_ms
-                    }
-                    
+                if isinstance(body, dict):
+                    # Ensure standardized error shape for non-2xx
+                    if response.status_code >= 400:
+                        body.setdefault('status', 'error')
+                        if 'message' not in body:
+                            body['message'] = body.get('detail', 'Request failed')
+
+                    # Ensure meta information
+                    meta = body.get('meta')
+                    if not isinstance(meta, dict):
+                        meta = {}
+                        body['meta'] = meta
+                    # Fill required meta fields
+                    meta.setdefault('request_id', request_id)
+                    meta.setdefault('timestamp', datetime.utcnow().isoformat())
+                    meta.setdefault('version', '1.0.0')
+                    meta.setdefault('processing_time_ms', processing_time_ms)
+
                     # Create new response with enhanced body
                     return JSONResponse(
                         content=body,
@@ -284,7 +332,7 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
             headers["X-Processing-Time"] = f"{processing_time_ms}ms"
         
         return JSONResponse(
-            content=error_response.dict(),
+            content=error_response.model_dump(mode='json'),
             status_code=status_code,
             headers=headers
         )
@@ -446,6 +494,7 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         self.requests_per_minute = requests_per_minute
         self.burst_size = burst_size
         self.clients = {}  # In production, use Redis or similar
+        self._last_cleanup = time.time()
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Apply rate limiting based on client IP."""
@@ -453,13 +502,26 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         client_ip = self._get_client_ip(request)
         current_time = time.time()
         
-        # Clean old entries (simple cleanup)
-        if len(self.clients) > 10000:  # Prevent memory bloat
-            cutoff_time = current_time - 3600  # Remove entries older than 1 hour
-            self.clients = {
-                ip: data for ip, data in self.clients.items() 
-                if data['last_request'] > cutoff_time
-            }
+        # Periodic cleanup to prevent memory leaks
+        if current_time - self._last_cleanup > 300:  # Cleanup every 5 minutes
+            self._cleanup_old_entries(current_time)
+            self._last_cleanup = current_time
+        
+        # More aggressive memory management to prevent leaks
+        if len(self.clients) > 1000:  # Reduced threshold for better memory management
+            self._cleanup_old_entries(current_time)
+        
+        # Emergency cleanup if still too many clients
+        if len(self.clients) > 2000:  # Hard limit to prevent memory exhaustion
+            # Aggressive cleanup: keep only 25% of clients (most recent)
+            sorted_clients = sorted(
+                self.clients.items(),
+                key=lambda x: x[1].get('last_request', 0),
+                reverse=True
+            )
+            keep_count = len(sorted_clients) // 4
+            self.clients = dict(sorted_clients[:keep_count])
+            logger.warning(f"Emergency memory cleanup: reduced clients from {len(sorted_clients)} to {keep_count}")
         
         # Get or create client data
         if client_ip not in self.clients:
@@ -511,6 +573,18 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Reset"] = str(int(current_time + 60))
         
         return response
+
+    def _cleanup_old_entries(self, current_time: float):
+        """Clean up old rate limiting entries to prevent memory leaks."""
+        cutoff_time = current_time - 3600  # Remove entries older than 1 hour
+        old_count = len(self.clients)
+        self.clients = {
+            ip: data for ip, data in self.clients.items() 
+            if data['last_request'] > cutoff_time
+        }
+        cleaned_count = old_count - len(self.clients)
+        if cleaned_count > 0:
+            logger.debug(f"Cleaned up {cleaned_count} old rate limiting entries")
 
     def _get_client_ip(self, request: Request) -> str:
         """Extract client IP address from request."""

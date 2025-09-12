@@ -1,16 +1,14 @@
-"""Cost tracking service for OpenRouter API calls.
-
-This module provides utilities to track and calculate costs from OpenRouter API responses.
-It handles both chat completions and image generation costs.
-"""
-
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
+
+# Remove duplicate CostInfo class definition - keeping the enhanced one below
+
 
 
 @dataclass
@@ -181,15 +179,28 @@ def estimate_image_cost(model: str, n_images: int) -> float:
     Returns:
         float: Estimated cost in USD
     """
-    # Image generation pricing (per image)
+    try:
+        n_images = max(1, int(n_images))
+    except (ValueError, TypeError):
+        n_images = 1
+    
+    # Image generation pricing (per image) - updated with realistic estimates
     image_pricing = {
-        "openrouter/gemini-2.5-flash-image": 0.04,  # Approximate
+        "openrouter/gemini-2.5-flash-image": 0.04,
+        "gemini-2.5-flash-image": 0.04,  # Support both with and without prefix
         "openrouter/dall-e-3": 0.08,
+        "dall-e-3": 0.08,
         "openrouter/dall-e-2": 0.02,
+        "dall-e-2": 0.02,
         "openrouter/stable-diffusion-xl": 0.01,
+        "stable-diffusion-xl": 0.01,
+        "openrouter/midjourney": 0.05,
+        "midjourney": 0.05,
     }
     
-    per_image_cost = image_pricing.get(model, 0.05)  # Default fallback
+    # Clean model name - remove openrouter prefix if present
+    clean_model = model.replace("openrouter/", "").lower()
+    per_image_cost = image_pricing.get(clean_model, 0.05)  # Default fallback
     total_cost = per_image_cost * n_images
     
     logger.debug(f"Estimated image cost for {model}: ${total_cost:.4f} ({n_images} images)")

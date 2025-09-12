@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
     libpq-dev \
+    libmagic1 \
+    file \
     && rm -rf /var/lib/apt/lists/*
 
 # Install poetry and psycopg2
@@ -15,8 +17,10 @@ RUN pip install poetry psycopg2-binary
 # Copy only pyproject.toml and poetry.lock to leverage Docker cache
 COPY api/pyproject.toml api/poetry.lock* ./
 
-# Install dependencies
-RUN poetry config virtualenvs.create false && poetry install --only main --no-interaction --no-ansi --no-root
+# Install dependencies (lock then install for reproducibility)
+RUN poetry config virtualenvs.create false \
+    && poetry lock --no-interaction --no-ansi \
+    && poetry install --only main -E observability -E security --no-interaction --no-ansi --no-root
 
 # Copy the API code
 COPY api/ .

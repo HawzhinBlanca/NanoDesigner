@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import os
 from typing import List, Tuple
 import json
 import os
@@ -11,7 +10,7 @@ from urllib.parse import urlparse
 
 from ..core.config import settings
 
-from .openrouter import call_openrouter, call_task, call_openrouter_images
+from .openrouter import call_openrouter, async_call_task, call_openrouter_images
 from .langfuse import Trace
 
 
@@ -29,10 +28,17 @@ def _extract_images_from_openrouter(resp: dict) -> List[Tuple[bytes, str]]:
                         url = part["url"]
                         # SSRF guard: only https and allowlist hosts if provided
                         _ssrf_guard(url)
-                        with httpx.Client(timeout=30.0) as client:
-                            r = client.get(url)
-                            r.raise_for_status()
-                            images.append((r.content, _infer_format_from_content_type(r.headers.get("content-type"))))
+                        with httpx.Client(timeout=10.0, follow_redirects=False) as client:
+                            with client.stream("GET", url) as r:
+                                r.raise_for_status()
+                                total = 0
+                                chunks: List[bytes] = []
+                                for chunk in r.iter_bytes():
+                                    total += len(chunk)
+                                    if total > 10_000_000:  # 10MB cap
+                                        raise ValueError("Image too large")
+                                    chunks.append(chunk)
+                                images.append((b"".join(chunks), _infer_format_from_content_type(r.headers.get("content-type"))))
                     elif part.get("type") == "image_base64" and "data" in part:
                         data = base64.b64decode(part["data"])  # assume png
                         images.append((data, "png"))
@@ -68,11 +74,11 @@ def _ssrf_guard(url: str) -> None:
             raise ValueError("Blocked external host")
 
 
-def generate_images(prompt: str, n: int = 1, size: str = "1024x1024", trace: Trace | None = None) -> List[Tuple[bytes, str]]:
+async def generate_images(prompt: str, n: int = 1, size: str = "1024x1024", trace: Trace | None = None) -> List[Tuple[bytes, str]]:
     # Try chat-completions route first
     resp = None
     try:
-        resp = call_task(
+        resp = await async_call_task(
             "image",
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
             trace=trace,
@@ -91,20 +97,24 @@ def generate_images(prompt: str, n: int = 1, size: str = "1024x1024", trace: Tra
         images = _extract_images_from_openrouter(resp)
     # Fallback to Images API if none found or chat-completions failed
     if not images:
-        raw = call_openrouter_images("openrouter/gemini-2.5-flash-image", prompt, n=n, size=size)
         try:
-            with open("/tmp/openrouter_images_resp.json", "w", encoding="utf-8") as f:
-                json.dump(raw, f)
-        except Exception:
-            pass
-        data = raw.get("data") or []
-        out: List[Tuple[bytes, str]] = []
-        for item in data:
-            b64 = item.get("b64_json") or item.get("b64") or item.get("data")
-            fmt = item.get("format") or "png"
-            if b64:
-                out.append((base64.b64decode(b64), fmt))
-        images = out
+            raw = call_openrouter_images(prompt, n=n, size=size, model="openrouter/gemini-2.5-flash-image")
+            try:
+                with open("/tmp/openrouter_images_resp.json", "w", encoding="utf-8") as f:
+                    json.dump(raw, f)
+            except Exception:
+                pass
+            data = raw.get("data") or []
+            out: List[Tuple[bytes, str]] = []
+            for item in data:
+                b64 = item.get("b64_json") or item.get("b64") or item.get("data")
+                fmt = item.get("format") or "png"
+                if b64:
+                    out.append((base64.b64decode(b64), fmt))
+            images = out
+        except Exception as e:
+            # Re-raise the actual error without falling back to mock
+            raise RuntimeError(f"Image generation failed: {str(e)}")
     if not images:
         raise RuntimeError("No images returned from model")
     return images[:n]

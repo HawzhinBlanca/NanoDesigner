@@ -12,8 +12,7 @@ export async function getSignedUploadUrl(
   fileName: string,
   fileType: string
 ): Promise<R2SignedUrlResponse> {
-  // In production, this would call your backend API to get a signed URL from R2
-  // For now, returning a mock response
+  // Call the backend API to get a signed URL from R2
   const response = await fetch(
     `${process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000"}/r2/signed-url`,
     {

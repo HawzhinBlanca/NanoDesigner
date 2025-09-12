@@ -1,1 +1,52 @@
-{"name":"sgd","private":true,"packageManager":"pnpm@9.0.0","workspaces":["apps/*","packages/*"]}
+{
+  "name": "sgd",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.47.2",
+    "puppeteer": "^24.19.0"
+  },
+  "version": "1.0.0",
+  "description": "End-to-end FastAPI service implementing the AGENTS.md spec: `/render`, `/ingest`, `/canon/derive`, `/critique`, `/healthz`, `/metrics`, with Guardrails-style JSON Schema validation, Redis cache, Qdrant vector store, Cloudflare R2 storage, Kong gateway config, and Langfuse tracing hooks.",
+  "main": "test_app_automation.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "tests"
+  },
+  "dependencies": {
+    "eslint": "^9.35.0",
+    "eslint-config-next": "^15.5.2",
+    "eslint-import-resolver-node": "^0.3.9",
+    "eslint-import-resolver-typescript": "^3.10.1",
+    "eslint-module-utils": "^2.12.1",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-scope": "^8.4.0",
+    "eslint-visitor-keys": "^4.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.18.3"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "e2e:playwright": "playwright test --config=tests/e2e/playwright.config.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HawzhinBlanca/NanoDesigner.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/HawzhinBlanca/NanoDesigner/issues"
+  },
+  "homepage": "https://github.com/HawzhinBlanca/NanoDesigner#readme"
+}

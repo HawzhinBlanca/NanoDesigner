@@ -95,11 +95,12 @@ class StandardResponse(BaseModel, Generic[T]):
         description="Response metadata"
     )
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {
+    model_config = {
+        "use_enum_values": True,
+        "json_encoders": {
             datetime: lambda v: v.isoformat()
         }
+    }
 
 class ListResponse(BaseModel, Generic[T]):
     """Standardized response for paginated list endpoints."""
@@ -121,8 +122,9 @@ class ListResponse(BaseModel, Generic[T]):
         description="Response metadata"
     )
     
-    class Config:
-        use_enum_values = True
+    model_config = {
+        "use_enum_values": True
+    }
 
 class ErrorDetail(BaseModel):
     """Detailed error information."""
@@ -164,8 +166,9 @@ class ErrorResponse(BaseModel):
         description="Response metadata"
     )
     
-    class Config:
-        use_enum_values = True
+    model_config = {
+        "use_enum_values": True
+    }
 
 class HealthResponse(BaseModel):
     """Health check response format."""
@@ -188,9 +191,9 @@ class HealthResponse(BaseModel):
         description="Response metadata"
     )
     
-    class Config:
-        use_enum_values = True
-        schema_extra = {
+    model_config = {
+        "use_enum_values": True,
+        "json_schema_extra": {
             "example": {
                 "status": "success",
                 "message": "System is healthy",
@@ -226,6 +229,7 @@ class HealthResponse(BaseModel):
                 }
             }
         }
+    }
 
 class JobStatus(str, Enum):
     """Job processing status values."""
@@ -255,9 +259,9 @@ class JobResponse(BaseModel):
         description="Response metadata"
     )
     
-    class Config:
-        use_enum_values = True
-        schema_extra = {
+    model_config = {
+        "use_enum_values": True,
+        "json_schema_extra": {
             "example": {
                 "status": "success",
                 "message": "Job submitted successfully",
@@ -282,6 +286,7 @@ class JobResponse(BaseModel):
                 }
             }
         }
+    }
 
 class ValidationErrorDetail(ErrorDetail):
     """Enhanced error detail for validation errors."""
@@ -303,8 +308,8 @@ class ValidationErrorResponse(ErrorResponse):
         description="List of validation errors"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "status": "error",
                 "message": "Request validation failed",
@@ -339,6 +344,7 @@ class ValidationErrorResponse(ErrorResponse):
                 }
             }
         }
+    }
 
 class MetricsResponse(BaseModel):
     """Response for metrics endpoint."""
@@ -357,9 +363,9 @@ class MetricsResponse(BaseModel):
         description="Response metadata"
     )
     
-    class Config:
-        use_enum_values = True
-        schema_extra = {
+    model_config = {
+        "use_enum_values": True,
+        "json_schema_extra": {
             "example": {
                 "status": "success",
                 "message": "Metrics collected successfully",
@@ -394,6 +400,7 @@ class MetricsResponse(BaseModel):
                 }
             }
         }
+    }
 
 # Response factory functions for consistent response creation
 

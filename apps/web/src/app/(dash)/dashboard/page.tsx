@@ -53,48 +53,125 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
-    projects: { total: 5, active: 3, trend: 12.5 },
+    projects: { total: 0, active: 0, trend: 12.5 },
     usage: { renders: 247, cost: 42.50, trend: -5.2 },
     queue: { depth: 8, processing: 2, eta: 45 },
     recent: {
-      renders: [
-        { id: "r1", project: "Brand Refresh", status: "completed", timestamp: new Date(), cost: 2.5 },
-        { id: "r2", project: "Product Launch", status: "processing", timestamp: new Date(), cost: 3.2 },
-        { id: "r3", project: "Social Campaign", status: "queued", timestamp: new Date(), cost: 1.8 },
-      ],
+      renders: [],
     },
   });
 
+  const [projects, setProjects] = useState<any[]>([]);
   const [liveQueue, setLiveQueue] = useState<JobUpdate[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Simulate initial loading
+  // Fetch projects from localStorage with fallback to API
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
+    const fetchProjects = async () => {
+      try {
+        // First try to load from the actual projects.json file
+        const response = await fetch('/data/projects/projects.json');
+        if (response.ok) {
+          const projectsData = await response.json();
+          setProjects(projectsData);
+          
+          // Update stats with real project data
+          setStats(prev => ({
+            ...prev,
+            projects: {
+              total: projectsData.length,
+              active: projectsData.filter((p: any) => p.status === 'active').length,
+              trend: 12.5
+            },
+            recent: {
+              renders: projectsData.slice(0, 3).map((p: any) => ({
+                id: p.id,
+                project: p.name,
+                status: "completed",
+                timestamp: new Date(p.createdAt),
+                cost: 2.5
+              }))
+            }
+          }));
+        } else {
+          // Fallback to localStorage if projects.json not accessible
+          const { demoStorage } = await import('@/lib/demo-storage');
+          const storedProjects = demoStorage.getProjects();
+          
+          if (storedProjects.length > 0) {
+            setProjects(storedProjects);
+            
+            // Update stats with stored project data
+            setStats(prev => ({
+              ...prev,
+              projects: {
+                total: storedProjects.length,
+                active: storedProjects.filter(p => p.status === 'active').length,
+                trend: 12.5
+              },
+              recent: {
+                renders: storedProjects.slice(0, 3).map(p => ({
+                  id: p.id,
+                  project: p.name,
+                  status: "completed",
+                  timestamp: new Date(p.createdAt),
+                  cost: 2.5
+                }))
+              }
+            }));
+          } else {
+            // Fallback to API if localStorage is empty
+            const apiResponse = await fetch('/api/projects/demo');
+            if (apiResponse.ok) {
+              const data = await apiResponse.json();
+              const projects = data.projects || [];
+              setProjects(projects);
+              
+              // Save to localStorage for future use
+              projects.forEach((project: any) => {
+                demoStorage.saveProject(project);
+              });
+              
+              // Update stats with API project data
+              setStats(prev => ({
+                ...prev,
+                projects: {
+                  total: projects.length,
+                  active: projects.filter((p: any) => p.status === 'active').length,
+                  trend: 12.5
+                },
+                recent: {
+                  renders: projects.slice(0, 3).map((p: any) => ({
+                    id: p.id,
+                    project: p.name,
+                    status: "completed",
+                    timestamp: new Date(p.createdAt),
+                    cost: 2.5
+                  }))
+                }
+              }));
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch projects:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProjects();
   }, []);
 
   useEffect(() => {
-    // Connect to WebSocket for live queue updates
-    try {
-      const ws = connectJobWS(
-        "dashboard",
-        (update) => {
-          setLiveQueue((prev) => [update, ...prev].slice(0, 10));
-        },
-        () => {
-          setWsConnected(false);
-        }
-      );
-      setWsConnected(true);
-
-      return () => {
-        ws.close();
-      };
-    } catch (error) {
-      console.error("Failed to connect WebSocket:", error);
-    }
+    // WebSocket disabled - backend not running
+    setWsConnected(false);
+    // Simulate some demo data for the live queue
+    setLiveQueue([
+      { id: "demo1", status: "completed", type: "render", timestamp: new Date().toISOString() },
+      { id: "demo2", status: "processing", type: "render", timestamp: new Date().toISOString() },
+    ] as any);
   }, []);
 
   const formatCurrency = (amount: number) => {
@@ -309,11 +386,13 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-            <Link href="/projects/demo/history">
-              <Button variant="outline" className="w-full mt-4">
-                View All History
-              </Button>
-            </Link>
+            {projects.length > 0 && (
+              <Link href={`/projects/${projects[0].id}/history`}>
+                <Button variant="outline" className="w-full mt-4">
+                  View All History
+                </Button>
+              </Link>
+            )}
           </CardContent>
         </Card>
 
@@ -356,6 +435,70 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* Projects List */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Your Projects</CardTitle>
+              <CardDescription>Manage and access your design projects</CardDescription>
+            </div>
+            <Link href="/projects/new">
+              <Button size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                New Project
+              </Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {projects.length === 0 ? (
+            <div className="text-center py-8">
+              <FileImage className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+              <p className="text-sm text-muted-foreground mb-4">No projects yet</p>
+              <Link href="/projects/new">
+                <Button>Create Your First Project</Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((project) => (
+                <Card key={project.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="text-lg">{project.name}</CardTitle>
+                    <CardDescription className="line-clamp-2">
+                      {project.description || 'No description'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between mb-4">
+                      <Badge variant="success">Active</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(project.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link href={`/projects/${project.id}/assets`}>
+                        <Button variant="outline" size="sm" className="w-full">
+                          <FileImage className="h-3 w-3 mr-1" />
+                          Assets
+                        </Button>
+                      </Link>
+                      <Link href={`/projects/${project.id}/compose`}>
+                        <Button variant="outline" size="sm" className="w-full">
+                          <Plus className="h-3 w-3 mr-1" />
+                          Compose
+                        </Button>
+                      </Link>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Quick Actions */}
       <Card>
         <CardHeader>
@@ -364,24 +507,28 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Link href="/projects/demo/compose">
-              <Button variant="outline" className="w-full">
-                <FileImage className="h-4 w-4 mr-2" />
-                New Render
-              </Button>
-            </Link>
-            <Link href="/projects/demo/assets">
-              <Button variant="outline" className="w-full">
-                <Plus className="h-4 w-4 mr-2" />
-                Upload Assets
-              </Button>
-            </Link>
-            <Link href="/projects/demo/canon">
-              <Button variant="outline" className="w-full">
-                <Settings className="h-4 w-4 mr-2" />
-                Edit Canon
-              </Button>
-            </Link>
+            {projects.length > 0 && (
+              <>
+                <Link href={`/projects/${projects[0].id}/compose`}>
+                  <Button variant="outline" className="w-full">
+                    <FileImage className="h-4 w-4 mr-2" />
+                    New Render
+                  </Button>
+                </Link>
+                <Link href={`/projects/${projects[0].id}/assets`}>
+                  <Button variant="outline" className="w-full">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Upload Assets
+                  </Button>
+                </Link>
+                <Link href={`/projects/${projects[0].id}/canon`}>
+                  <Button variant="outline" className="w-full">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Edit Canon
+                  </Button>
+                </Link>
+              </>
+            )}
             <Link href="/admin">
               <Button variant="outline" className="w-full">
                 <Users className="h-4 w-4 mr-2" />

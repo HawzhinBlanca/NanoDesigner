@@ -1,7 +1,7 @@
 /**
  * Production API client with real backend integration
  * 
- * This replaces the demo/placeholder API with our bulletproof backend:
+ * Production API client with bulletproof backend integration:
  * - Real TypeScript types from OpenAPI spec
  * - Comprehensive error handling with retry logic
  * - Authentication support

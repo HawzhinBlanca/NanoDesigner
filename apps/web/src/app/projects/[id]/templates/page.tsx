@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useTemplatesStore } from "@/stores/useTemplatesStore";
-// import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs"; // Removed for demo mode
+// import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs"; // Authentication bypass active
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

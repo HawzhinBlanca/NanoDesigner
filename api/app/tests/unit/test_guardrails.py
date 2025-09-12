@@ -31,20 +31,31 @@ class TestGuardrailsService:
         try:
             # Mock the path resolution to point to our temp file
             with patch('app.services.guardrails.Path') as mock_path:
-                mock_path_instance = Mock()
-                mock_path_instance.resolve.return_value.parents = [Path('/app')]
-                mock_path.return_value = mock_path_instance
+                # Create a mock that supports path operations
+                from pathlib import Path as RealPath
+                mock_current = Mock()
+                mock_parent = Mock()
                 
-                # Mock the schema path to point to our temp file
-                with patch.object(Path, '__truediv__', return_value=temp_file):
-                    validator = _load_schema('test_schema.json')
-                    
-                    # Test that validator is created and cached
-                    assert validator is not None
-                    
-                    # Test caching - second call should return same validator
-                    validator2 = _load_schema('test_schema.json')
-                    assert validator is validator2
+                # Set up the mock chain
+                mock_path.return_value = mock_current
+                mock_current.resolve.return_value = mock_current
+                mock_current.parent = mock_parent
+                mock_current.parents = [mock_parent]
+                
+                # Mock the guardrails path to exist and return our temp file
+                mock_guardrails = Mock()
+                mock_guardrails.exists.return_value = True
+                mock_guardrails.__truediv__ = Mock(return_value=temp_file)
+                mock_parent.__truediv__ = Mock(return_value=mock_guardrails)
+                
+                validator = _load_schema('test_schema.json')
+                
+                # Test that validator is created and cached
+                assert validator is not None
+                
+                # Test caching - second call should return same validator
+                validator2 = _load_schema('test_schema.json')
+                assert validator is validator2
                     
         finally:
             temp_file.unlink()  # Clean up temp file
@@ -146,10 +157,22 @@ class TestGuardrailsService:
              patch('builtins.open'), \
              patch('json.load') as mock_json_load:
             
-            # Setup mocks
-            mock_path_instance = Mock()
-            mock_path_instance.resolve.return_value.parents = [Path('/app')]
-            mock_path.return_value = mock_path_instance
+            # Setup mocks similar to the first test
+            mock_current = Mock()
+            mock_parent = Mock()
+            
+            # Set up the mock chain
+            mock_path.return_value = mock_current
+            mock_current.resolve.return_value = mock_current
+            mock_current.parent = mock_parent
+            mock_current.parents = [mock_parent]
+            
+            # Mock the guardrails path to exist
+            mock_guardrails = Mock()
+            mock_guardrails.exists.return_value = True
+            mock_schema_path = Mock()
+            mock_guardrails.__truediv__ = Mock(return_value=mock_schema_path)
+            mock_parent.__truediv__ = Mock(return_value=mock_guardrails)
             
             mock_json_load.return_value = {
                 "type": "object",

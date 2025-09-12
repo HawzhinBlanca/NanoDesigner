@@ -46,7 +46,7 @@ export default function HomePage() {
             
             <Button variant="outline" size="lg" className="px-8 py-3">
               <PlayCircle className="h-5 w-5 mr-2" />
-              Watch Demo
+              Learn More
             </Button>
           </div>
           

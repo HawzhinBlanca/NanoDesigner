@@ -92,15 +92,15 @@ export const useComposerStore = create<ComposerState>()(
       setDimensions: (dimensions) => set({ dimensions }),
       
       generateVariants: (count) => {
-        const newVariants: Variant[] = [];
-        for (let i = 0; i < count; i++) {
-          newVariants.push({
-            id: `variant-${Date.now()}-${i}`,
-            prompt: get().prompt,
-            constraints: get().constraints,
-            status: "idle",
-          });
-        }
+        const baseTs = Date.now();
+        const prompt = get().prompt;
+        const constraints = get().constraints;
+        const newVariants: Variant[] = Array.from({ length: count }).map((_, i) => ({
+          id: `variant-${baseTs}-${i}`,
+          prompt,
+          constraints,
+          status: "idle",
+        }));
         set((state) => ({ variants: [...state.variants, ...newVariants] }));
       },
       
@@ -116,12 +116,19 @@ export const useComposerStore = create<ComposerState>()(
         })),
       
       removeVariant: (id) =>
-        set((state) => ({
-          variants: state.variants.filter((v) => v.id !== id),
-          selectedVariantId:
-            state.selectedVariantId === id ? null : state.selectedVariantId,
-          comparing: state.comparing.filter((cId) => cId !== id),
-        })),
+        set((state) => {
+          const newVariants = state.variants.filter((v) => v.id !== id);
+          const newSelectedId = state.selectedVariantId === id 
+            ? (newVariants.length > 0 ? newVariants[0].id : null)
+            : state.selectedVariantId;
+          const newComparing = state.comparing.filter((cId) => cId !== id);
+          
+          return {
+            variants: newVariants,
+            selectedVariantId: newSelectedId,
+            comparing: newComparing,
+          };
+        }),
       
       setGenerating: (isGenerating) => set({ isGenerating }),
       

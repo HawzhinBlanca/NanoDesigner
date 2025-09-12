@@ -1,25 +1,87 @@
 import { withSentryConfig } from "@sentry/nextjs";
 
-/** @type {import('next').NextConfig} */
-const withBundleAnalyzer = (config) => {
-  if (process.env.ANALYZE === 'true') {
-    // Next 15 built-in analyzer flag (simulate via env guard)
-    config.experimental = config.experimental || {};
-    config.experimental.optimizePackageImports = ["lucide-react", "@radix-ui/react-*"];
+// Security headers configuration
+const securityHeaders = [
+  {
+    key: 'Content-Security-Policy',
+    value: process.env.NODE_ENV === 'production'
+      // Tight production policy: no unsafe-eval/inline for scripts
+      ? [
+          "default-src 'self'",
+          "img-src 'self' https: data:",
+          "script-src 'self' https://*.clerk.accounts.dev https://*.clerk.com https://*.sentry.io",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' data: https://fonts.gstatic.com",
+          "connect-src 'self' https://api.nanodesigner.com https://openrouter.ai https://*.sentry.io",
+          "frame-ancestors 'none'",
+        ].join('; ')
+      : [
+          "default-src 'self'",
+          "img-src 'self' http: https: data:",
+          "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.clerk.accounts.dev https://*.clerk.com",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' data: https://fonts.gstatic.com",
+          "connect-src 'self' http://localhost:* ws://localhost:* https://*.sentry.io",
+        ].join('; ')
+  },
+  {
+    key: 'X-Frame-Options',
+    value: 'DENY'
+  },
+  {
+    key: 'X-Content-Type-Options',
+    value: 'nosniff'
+  },
+  {
+    key: 'X-DNS-Prefetch-Control',
+    value: 'on'
+  },
+  {
+    key: 'Strict-Transport-Security',
+    value: 'max-age=31536000; includeSubDomains'
+  },
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(), geolocation=()'
+  },
+  {
+    key: 'Referrer-Policy',
+    value: 'strict-origin-when-cross-origin'
   }
-  return config;
+];
+
+/** @type {import('next').NextConfig} */
+const baseConfig = {
+  images: { 
+    formats: ["image/avif", "image/webp"], 
+    minimumCacheTTL: 60,
+    domains: ['via.placeholder.com', 'images.unsplash.com'],
+    dangerouslyAllowSVG: false,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;"
+  },
+  compiler: { 
+    removeConsole: process.env.NODE_ENV === "production" 
+  },
+  productionBrowserSourceMaps: false,
+  
+  // Add security headers
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: securityHeaders,
+      },
+    ];
+  },
+  
+  // Enable SWC minification
+  swcMinify: true,
+  
+  // Optimize bundle
+  experimental: {
+    optimizeCss: true,
+    optimizePackageImports: ['@radix-ui', '@tanstack', 'lucide-react']
+  }
 };
 
-let baseConfig = withBundleAnalyzer({
-  experimental: {
-    optimizePackageImports: ["lucide-react", "@radix-ui/react-*"]
-  },
-  images: { formats: ["image/avif", "image/webp"], minimumCacheTTL: 60 },
-  compiler: { removeConsole: process.env.NODE_ENV === "production" },
-  productionBrowserSourceMaps: false
-});
-
-const nextConfig = withSentryConfig(baseConfig, { silent: true });
-
-export default nextConfig;
-
+export default withSentryConfig(baseConfig, { silent: true });

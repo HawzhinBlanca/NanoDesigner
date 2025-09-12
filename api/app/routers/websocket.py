@@ -2,7 +2,7 @@
 WebSocket endpoints for real-time job status updates
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -16,33 +16,36 @@ router = APIRouter()
 
 
 class ConnectionManager:
-    """Manages WebSocket connections for job updates"""
+    """Manages WebSocket connections for job updates (per-connection pubsub)."""
     
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
-        self.redis_client = None
-        self.pubsub = None
+        self.redis_client: Optional[redis.Redis] = None
+        self._job_pubsubs: Dict[str, Any] = {}
         
     async def connect(self, job_id: str, websocket: WebSocket):
         """Accept connection and start listening to Redis pub/sub"""
         await websocket.accept()
         self.active_connections[job_id] = websocket
         
-        # Connect to Redis if not connected
         if not self.redis_client:
             self.redis_client = await redis.from_url(settings.redis_url, decode_responses=True)
-            self.pubsub = self.redis_client.pubsub()
-            
-        # Subscribe to job channel
-        await self.pubsub.subscribe(f"job:{job_id}")
+        # Create dedicated pubsub for this job
+        pubsub = self.redis_client.pubsub()
+        await pubsub.subscribe(f"job:{job_id}")
+        self._job_pubsubs[job_id] = pubsub
         
     async def disconnect(self, job_id: str):
         """Remove connection and unsubscribe"""
         if job_id in self.active_connections:
             del self.active_connections[job_id]
-            
-        if self.pubsub:
-            await self.pubsub.unsubscribe(f"job:{job_id}")
+        pubsub = self._job_pubsubs.pop(job_id, None)
+        if pubsub:
+            try:
+                await pubsub.unsubscribe(f"job:{job_id}")
+                await pubsub.aclose()
+            except Exception:
+                pass
             
     async def send_update(self, job_id: str, message: Dict[str, Any]):
         """Send message to specific connection"""
@@ -52,14 +55,15 @@ class ConnectionManager:
             
     async def listen_for_updates(self, job_id: str):
         """Listen for Redis pub/sub messages and forward to WebSocket"""
+        pubsub = self._job_pubsubs.get(job_id)
+        if not pubsub:
+            return
         try:
-            async for message in self.pubsub.listen():
+            async for message in pubsub.listen():
                 if message["type"] == "message":
                     data = json.loads(message["data"])
                     await self.send_update(job_id, data)
-                    
-                    # If job is completed or failed, close connection
-                    if data.get("status") in ["completed", "failed"]:
+                    if data.get("status") in ["completed", "failed", "cancelled"]:
                         await self.disconnect(job_id)
                         break
         except Exception as e:

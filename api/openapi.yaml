@@ -63,6 +63,12 @@ paths:
       responses:
         '200':
           description: OK
+  /metrics/json:
+    get:
+      summary: JSON metrics
+      responses:
+        '200':
+          description: OK
   /render:
     post:
       summary: Render images
@@ -170,10 +176,9 @@ components:
           type: array
           items:
             type: object
-            required: [url, r2_key]
+            required: [url]
             properties:
               url: { type: string }
-              r2_key: { type: string }
               synthid:
                 type: object
                 properties:

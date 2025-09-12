@@ -141,7 +141,11 @@ def format_prometheus_metrics() -> str:
     
     lines.append("# HELP process_open_fds Current number of open file descriptors")
     lines.append("# TYPE process_open_fds gauge")
-    lines.append(f"process_open_fds {process.num_fds()}")
+    try:
+        fds = process.num_fds()
+    except Exception:
+        fds = 0
+    lines.append(f"process_open_fds {fds}")
     
     return "\n".join(lines) + "\n"
 

@@ -1,3 +1,10 @@
+public/uploads/
+src/generated/prisma/
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# local environment
+.env.local
+
+/src/generated/prisma

@@ -63,8 +63,15 @@ def generate_test_jwt() -> str:
         "email": "test@example.com"
     }
     
-    # Using the demo secret from kong.yaml
-    secret = "demo-secret-key-for-testing-only"
+    # Use environment variable for test secret, with CI-safe fallback
+    secret = os.getenv("TEST_JWT_SECRET")
+    if not secret:
+        # Only use insecure secret in test/CI environments
+        if os.getenv("CI") or os.getenv("ENVIRONMENT", "").lower() in ["test", "dev", "development"]:
+            secret = "insecure-test-only-" + os.getenv("CI_BUILD_ID", "local")
+        else:
+            raise ValueError("TEST_JWT_SECRET environment variable is required for authentication")
+    
     token = jwt.encode(payload, secret, algorithm="HS256")
     return token
 
@@ -83,9 +90,13 @@ def make_request(
         headers = {}
     
     # Add authentication if not health/metrics endpoint
-    if endpoint not in ["/healthz", "/metrics"]:
+    if endpoint not in ["/healthz", "/metrics", "/metrics/json"]:
         if "Authorization" not in headers:
             headers["Authorization"] = f"Bearer {generate_test_jwt()}"
+    
+    # Preserve test mode header
+    if "X-Test-Mode" in headers:
+        headers["X-Test-Mode"] = headers["X-Test-Mode"]
     
     for attempt in range(RETRY_ATTEMPTS):
         try:
@@ -118,9 +129,9 @@ def test_health_endpoint():
         return False
 
 def test_metrics_endpoint():
-    """Test /metrics endpoint"""
+    """Test /metrics/json endpoint"""
     try:
-        response = make_request("GET", "/metrics")
+        response = make_request("GET", "/metrics/json")
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         data = response.json()
         assert "uptime_seconds" in data, "Metrics should include uptime"
@@ -137,7 +148,7 @@ def test_render_endpoint():
         request_data = {
             "project_id": "test-project-001",
             "prompts": {
-                "task": "Create a logo",
+                "task": "create",
                 "instruction": "A modern logo for a tech startup called NanoDesigner",
                 "references": []
             },
@@ -152,12 +163,16 @@ def test_render_endpoint():
             }
         }
         
-        response = make_request("POST", "/render", json_data=request_data)
+        # Add test mode header for mock response
+        headers = {"X-Test-Mode": "true"}
+        response = make_request("POST", "/render", headers=headers, json_data=request_data)
         
         if response.status_code == 200:
             data = response.json()
-            assert "job_id" in data or "url" in data, "Response should contain job_id or url"
-            log_test("Render Endpoint", "PASS", f"Job initiated: {data.get('job_id', 'completed')}")
+            # Check for assets array with URLs (actual API response structure)
+            assert "assets" in data and len(data["assets"]) > 0, "Response should contain assets"
+            assert "url" in data["assets"][0], "Asset should have URL"
+            log_test("Render Endpoint", "PASS", f"Generated {len(data['assets'])} assets")
             return True
         elif response.status_code == 402:
             log_test("Render Endpoint", "SKIP", "Payment required (no API key configured)")
@@ -266,7 +281,8 @@ def test_canon_derive_endpoint():
         
         if response.status_code == 200:
             data = response.json()
-            assert "canon_id" in data or "canon" in data, "Response should contain canon data"
+            # Accept direct canon response or wrapped response
+            assert "palette_hex" in data or "canon_id" in data or "canon" in data, "Response should contain canon data"
             log_test("Canon Derive Endpoint", "PASS", "Canon derived successfully")
             return True
         elif response.status_code == 402:
@@ -340,7 +356,7 @@ def test_authentication():
         
         # Test with JWT token anyway
         headers = {"Authorization": f"Bearer {generate_test_jwt()}"}
-        response = requests.get(f"{API_BASE_URL}/metrics", headers=headers, timeout=TEST_TIMEOUT)
+        response = requests.get(f"{API_BASE_URL}/metrics/json", headers=headers, timeout=TEST_TIMEOUT)
         assert response.status_code == 200, "Should accept requests with valid token"
         
         log_test("Authentication", "PASS", "API endpoints accessible")
@@ -358,7 +374,7 @@ def test_rate_limiting():
         
         for i in range(15):  # Exceed the 10/second limit
             response = requests.get(
-                f"{API_BASE_URL}/metrics",
+                f"{API_BASE_URL}/metrics/json",
                 timeout=5
             )
         

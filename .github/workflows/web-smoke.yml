@@ -1,0 +1,23 @@
+name: web-smoke
+on: [push, pull_request]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with: { version: 9 }
+      - name: Install deps
+        run: pnpm -C apps/web install
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps | cat
+      - name: Run Playwright smoke
+        run: pnpm -C apps/web test:e2e:smoke
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-smoke-report
+          path: apps/web/playwright-report
+

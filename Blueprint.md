@@ -73,7 +73,7 @@
       "REDIS_URL": "redis://redis:6379/0",
       "QDRANT_URL": "http://qdrant:6333",
       "QDRANT_API_KEY": "",
-      "STORAGE_BACKEND": "auto | local | s3",
+      "STORAGE_BACKEND": "auto(dev=local,prod=s3) | local | s3",
       "LOCAL_STORAGE_DIR": "var/storage",
       "SERVICE_BASE_URL": "http://localhost:8000",
       "S3_ENDPOINT_URL": "https://<provider-endpoint> (optional; e.g., R2/Spaces/MinIO)",
@@ -169,7 +169,7 @@
       "inputs": ["multi-image refs", "brand canon constraints", "edit ops"],
       "outputs": ["object store key (local or S3)", "SynthID metadata"],
       "post": ["critic review", "auto-repair (optional)"],
-      "safety": ["max area limit", "NSFW/off-brand filters"]
+      "safety": ["max dimensions 4096x4096", "max area 16777216 px", "NSFW/off-brand filters"]
     },
     "ingest_pipeline": {
       "steps": [
@@ -193,8 +193,8 @@
     "cache": {
       "redis": {
         "namespaces": {
-          "embed_cache": "sha1(content) → vector",
-          "plan_cache": "sha1(canon+prompt) → plan",
+          "embed_cache": "sha256(content) → vector",
+          "plan_cache": "sha256(canon+prompt) → plan",
           "rate_counters": "per-key sliding window"
         },
         "ttl_seconds": { "embed_cache": 864000, "plan_cache": 86400 }
@@ -238,7 +238,7 @@
     "observability": {
       "langfuse": {
         "trace_all_llm_calls": true,
-        "log": ["prompt", "model", "latency_ms", "cost_usd", "tokens", "guardrails_status"]
+        "log": ["prompt_hash", "model", "latency_ms", "cost_usd", "tokens", "guardrails_status"]
       },
       "metrics": ["p95_latency", "image_success_rate", "cache_hit_rate", "openrouter_4xx_5xx", "cost_per_job"]
     },
@@ -273,7 +273,7 @@
             "instruction": { "type": "string", "minLength": 5 },
             "references": {
               "type": "array",
-              "items": { "type": "string", "description": "R2 object keys or https URLs (CDN)" },
+              "items": { "type": "string", "description": "R2 object keys or https URLs on allowlisted CDN domains (https only)" },
               "maxItems": 8
             }
           }
@@ -305,10 +305,9 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["url", "r2_key"],
+            "required": ["url"],
             "properties": {
               "url": { "type": "string" },
-              "r2_key": { "type": "string" },
               "synthid": { "type": "object", "properties": { "present": { "type": "boolean" }, "payload": { "type": "string" } } }
             }
           }
@@ -409,7 +408,7 @@
       "type": "object",
       "required": ["score","violations"],
       "properties": {
-        "score": { "type": "number" },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
         "violations": { "type": "array", "items": { "type": "string" } },
         "repair_suggestions": { "type": "array", "items": { "type": "string" } }
       }
@@ -424,9 +423,9 @@
       { "name": "sgd-api-route", "service": "sgd-api", "paths": ["/"], "strip_path": false }
     ],
     "plugins": [
-      { "name": "jwt", "config": { "key_claim_name": "sub", "claims_to_verify": ["exp"], "secret_is_base64": false, "run_on_preflight": true, "uri_param_names": ["jwt"], "cookie_names": ["__session"] } },
-      { "name": "rate-limiting", "config": { "second": 10, "minute": 100, "policy": "local", "limit_by": "credential" } },
-      { "name": "request-size-limiting", "config": { "allowed_payload_size": 10 } },
+      { "name": "openid-connect", "config": { "issuer": "https://clerk.your-domain", "discovery": true, "bearer_only": true, "scopes_required": [], "verify_parameters": ["exp"], "set_access_token_header": true, "upstream_headers": ["X-User-Sub: sub", "X-Org-Id: org_id", "X-User-Roles: roles"] } },
+      { "name": "rate-limiting", "config": { "second": 10, "minute": 100, "policy": "redis", "limit_by": "credential", "redis_host": "redis", "redis_port": 6379, "redis_database": 0 } },
+      { "name": "request-size-limiting", "config": { "allowed_payload_size": 50 } },
       { "name": "cors", "config": { "origins": ["*"], "methods": ["GET","POST"], "headers": ["Authorization","Content-Type"], "credentials": false } }
     ]
   },
@@ -582,14 +581,15 @@ def health():
 ",
     "openrouter_call": "def call_openrouter(model, messages, **kw):
     import httpx, os
-    r = httpx.post('https://openrouter.ai/api/v1/chat/completions', headers={'Authorization': f'Bearer {os.environ["OPENROUTER_API_KEY"]}', 'HTTP-Referer': 'https://yourapp', 'X-Title': 'sgd-api'}, json={'model': model, 'messages': messages, **kw}, timeout=30.0)
+    r = httpx.post('https://openrouter.ai/api/v1/chat/completions', headers={'Authorization': f'Bearer {os.environ[\"OPENROUTER_API_KEY\"]}', 'HTTP-Referer': 'https://yourapp', 'X-Title': 'sgd-api'}, json={'model': model, 'messages': messages, **kw}, timeout=20.0)
     r.raise_for_status(); return r.json()",
     "gemini_image_call": "def gen_image(prompt):
-    return call_openrouter('google/gemini-2.5-flash-image', [{'role':'user','content':prompt}])",
+    return call_openrouter('openrouter/gemini-2.5-flash-image', [{'role':'user','content':prompt}])",
     "redis_cache": "def cache_get_set(client, key, factory, ttl=86400):
+    import json
     v = client.get(key)
-    if v: return v
-    v = factory(); client.setex(key, ttl, v); return v"
+    if v: return json.loads(v)
+    v = factory(); client.setex(key, ttl, json.dumps(v)); return v"
   },
   "risk_register": [
     { "risk": "OpenRouter latency/quotas", "mitigation": "fallbacks + backoff; budget caps per task" },

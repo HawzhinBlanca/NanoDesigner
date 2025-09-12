@@ -5,9 +5,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Body, HTTPException
 
-from ..models.schemas import CanonDeriveRequest, CanonDeriveResponse
+from ..models.schemas import CanonDeriveRequest, CanonDeriveResponse, CanonSaveRequest, CanonSaveResponse
 from ..services.guardrails import validate_contract
-from ..services.canon import extract_canon_from_evidence, derive_canon_from_project
+from ..services.canon import extract_canon_from_evidence, derive_canon_from_project, save_canon
 from ..services.redis import cache_get_set, sha1key
 from ..services.langfuse import Trace
 
@@ -41,21 +41,8 @@ async def canon_derive(request: CanonDeriveRequest = Body(...)):
             # Auto-derive from project assets
             canon = derive_canon_from_project(project_id, trace=trace)
     
-    # Validate with Guardrails
-    try:
-        validate_contract("canon.json", canon)
-    except Exception as e:
-        trace.log(f"Canon validation failed: {e}")
-        # Use safe defaults if validation fails
-        canon = {
-            "palette_hex": ["#000000", "#FFFFFF"],
-            "fonts": ["Helvetica", "Arial"],
-            "voice": {
-                "tone": "professional",
-                "dos": ["Be clear", "Be concise"],
-                "donts": ["Avoid jargon"]
-            }
-        }
+    # Validate with Guardrails - strictly reject on failure per blueprint
+    validate_contract("canon.json", canon)
     
     # Cache the derived canon
     cache_key = sha1key("canon", project_id, "derived")
@@ -90,3 +77,43 @@ async def get_canon(project_id: str):
     await trace.flush()
     
     return canon
+
+
+@router.put("/canon/{project_id}", response_model=CanonSaveResponse)
+async def save_canon_endpoint(project_id: str, request: CanonSaveRequest = Body(...)):
+    """
+    Save/update canon for a project.
+    
+    Stores the canon data in Redis cache with proper TTL.
+    Validates the canon structure before saving.
+    """
+    trace = Trace("save_canon")
+    
+    try:
+        # Convert request to dictionary format
+        canon_data = {
+            "palette_hex": request.palette_hex,
+            "fonts": request.fonts,
+            "voice": {
+                "tone": request.voice.tone,
+                "dos": request.voice.dos,
+                "donts": request.voice.donts
+            }
+        }
+        
+        # Save canon data
+        save_canon(project_id, canon_data, trace=trace)
+        
+        await trace.flush()
+        
+        return CanonSaveResponse(
+            success=True,
+            message=f"Canon successfully saved for project {project_id}"
+        )
+        
+    except Exception as e:
+        await trace.flush()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to save canon: {str(e)}"
+        )

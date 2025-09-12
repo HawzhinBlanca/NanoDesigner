@@ -22,10 +22,21 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.production.example
+.env.production
+production-secrets-*.txt
+*.key
+*.pem
+*.crt
 
 # Runtime & storage
 var/storage/**
 *.log
+
+# Local data & binaries
+infra/minio/
+api/var/
+k6.deb
 
 # IDE & OS
 .DS_Store
@@ -39,8 +50,14 @@ var/storage/**
 coverage/
 test-results/
 playwright-report/
+tests/e2e/e2e-outputs/
+tests/e2e/e2e-outputs/**
 
 # Temporary files
 *.tmp
 *.temp
 .cache/
+
+# Claude AI specific
+.claude/
+CLAUDE.md.json
