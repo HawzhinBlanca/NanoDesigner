@@ -19,11 +19,10 @@ from .middleware.request_response import (
     RequestResponseMiddleware
 )
 from .core.rate_limiter import RateLimitMiddleware
-from .routers import render, health, health_detailed, ingest, canon, critique, websocket, async_render, prometheus, admin, e2e, upload, monitoring
-# Mock routers removed - moved to tests/mocks  
+from .routers import render, health, health_detailed, ingest, canon, critique, websocket, async_render, prometheus, admin, e2e, upload
+# Mock routers removed - moved to tests/mocks
 # from .routers import render_mock, render_simple
 from .services.e2e_performance import E2EPerformanceOptimizer
-from .monitoring.production_monitoring import setup_monitoring
 
 
 setup_logging(settings.log_level)
@@ -150,9 +149,6 @@ if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
 
 # Initialize E2E services
 performance_optimizer = E2EPerformanceOptimizer()
-
-# Setup production monitoring
-app = setup_monitoring(app)
 
 # Add request/response middleware first to ensure headers/meta
 app.add_middleware(RequestResponseMiddleware)
@@ -293,7 +289,6 @@ app.include_router(websocket.router)
 app.include_router(prometheus.router)
 app.include_router(admin.router)
 app.include_router(e2e.router)
-app.include_router(monitoring.router)
 
 # Add version discovery endpoint
 app.get("/api/versions", tags=["versioning"])(get_api_versions)

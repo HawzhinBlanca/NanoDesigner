@@ -1,13 +1,12 @@
 {
-  "model": "google/gemini-2.5-flash-image-preview",
   "tasks": {
-    "planner": { "primary": "google/gemini-2.5-flash-image-preview", "max_cost_usd": 0.10 },
-    "critic": { "primary": "google/gemini-2.5-flash-image-preview", "max_cost_usd": 0.10 },
-    "draft": { "primary": "google/gemini-2.5-flash-image-preview", "max_cost_usd": 0.10 },
-    "image": { "primary": "google/gemini-2.5-flash-image-preview", "max_cost_usd": 0.10 },
-    "canon": { "primary": "google/gemini-2.5-flash-image-preview", "max_cost_usd": 0.10 }
+    "planner": { "primary": "openai/gpt-4o", "fallbacks": ["anthropic/claude-3.5-sonnet"], "max_cost_usd": 0.02 },
+    "critic": { "primary": "anthropic/claude-3.5-sonnet", "fallbacks": ["openai/gpt-4o"], "max_cost_usd": 0.02 },
+    "draft":  { "primary": "openai/gpt-4o-mini", "fallbacks": ["openai/gpt-3.5-turbo"], "max_cost_usd": 0.005 },
+    "image":  { "primary": "openai/dall-e-3", "max_cost_usd": 0.10 },
+    "canon":  { "primary": "openai/gpt-4o", "fallbacks": ["anthropic/claude-3.5-sonnet"], "max_cost_usd": 0.02 }
   },
-  "retry": { "max_attempts": 3, "backoff_ms": 500 },
-  "timeouts_ms": { "default": 30000, "image": 60000 },
+  "retry": { "max_attempts": 2, "backoff_ms": 400 },
+  "timeouts_ms": { "default": 20000, "image": 45000 },
   "telemetry": { "langfuse_trace": true }
 }

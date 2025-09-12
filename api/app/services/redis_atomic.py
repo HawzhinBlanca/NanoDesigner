@@ -442,46 +442,22 @@ def cached(
 class AtomicCache:
     """Simple atomic cache wrapper for backward compatibility."""
     def __init__(self) -> None:
-        try:
-            self.r = get_client()
-            self._cache = AtomicRedisCache(self.r)
-            self._redis_available = True
-        except Exception:
-            self.r = None
-            self._cache = None
-            self._redis_available = False
-            self._memory_cache = {}
+        self.r = get_client()
+        self._cache = AtomicRedisCache(self.r)
 
     def generate_cache_key(self, *parts: Any) -> str:
         return sha256key(*parts)
 
     async def async_get_with_lock(self, key: str, factory: Callable[[], Any], ttl: int = 86400, use_stale: bool = True) -> Any:
-        if self._redis_available and self._cache:
-            try:
-                return await self._cache.async_get_with_lock(key, factory, ttl, use_stale)
-            except Exception:
-                # Redis failed, fall back to memory cache
-                pass
-        
-        # Use in-memory cache as fallback
-        if key in self._memory_cache:
-            return self._memory_cache[key]
-        
-        result = await factory()
-        self._memory_cache[key] = result
-        return result
+        return await self._cache.async_get_with_lock(key, factory, ttl, use_stale)
 
 # Global cache instances
 _global_cache: Optional[AtomicRedisCache] = None
 _simple_cache: Optional[AtomicCache] = None
 
-def get_atomic_cache() -> Optional[AtomicCache]:
+def get_atomic_cache() -> AtomicCache:
     """Get global atomic cache instance (backward compatible)."""
     global _simple_cache
     if _simple_cache is None:
-        try:
-            _simple_cache = AtomicCache()
-        except Exception:
-            # Return None if cache can't be initialized
-            return None
+        _simple_cache = AtomicCache()
     return _simple_cache

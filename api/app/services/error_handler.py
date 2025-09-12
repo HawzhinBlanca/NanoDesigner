@@ -76,25 +76,8 @@ def safe_json_parse(content: Any, context: str, fallback: Any = None) -> Any:
         return content
     if not isinstance(content, str):
         return fallback
-    
-    # Handle markdown code blocks (```json ... ```)
-    content_str = content.strip()
-    if content_str.startswith("```"):
-        # Extract content between code blocks
-        lines = content_str.split('\n')
-        if len(lines) > 2:
-            # Remove first line (```json or similar) and last line (```)
-            json_lines = []
-            for i, line in enumerate(lines):
-                if i == 0 and line.startswith("```"):
-                    continue
-                if line == "```":
-                    break
-                json_lines.append(line)
-            content_str = '\n'.join(json_lines)
-    
     try:
-        return json.loads(content_str)
+        return json.loads(content)
     except Exception:  # noqa: BLE001
         # Temporarily disabled logging to avoid scoping issues
         # logger.debug(f"safe_json_parse failed for {context}")
@@ -327,7 +310,35 @@ def validate_input(data: Any,
             raise ValidationError(field_name, message, data)
 
 
-# Duplicate safe_json_parse removed - using the first definition with markdown code block support
+def safe_json_parse(json_str: str, 
+                   field_name: str = "json_data",
+                   fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Safely parse JSON with error handling.
+    
+    Args:
+        json_str: JSON string to parse
+        field_name: Name of the field for error reporting
+        fallback: Fallback value if parsing fails
+        
+    Returns:
+        Dict: Parsed JSON data or fallback
+        
+    Raises:
+        ValidationError: If parsing fails and no fallback provided
+    """
+    try:
+        import json
+        return json.loads(json_str)
+    except (json.JSONDecodeError, TypeError) as e:
+        if fallback is not None:
+            logger.warning(f"JSON parsing failed for {field_name}, using fallback: {e}")
+            return fallback
+        
+        raise ValidationError(
+            field_name,
+            f"Invalid JSON format: {str(e)}",
+            json_str[:100] + "..." if len(json_str) > 100 else json_str
+        )
 
 
 def retry_with_backoff(max_retries: int = 3, 

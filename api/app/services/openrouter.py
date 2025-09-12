@@ -65,7 +65,7 @@ def call_openrouter(messages: list, model: str | None = None, **kwargs) -> Dict[
     import httpx
     headers = _headers()
     payload = {
-        "model": model or kwargs.get("model") or "google/gemini-2.5-flash-image-preview",
+        "model": model or kwargs.get("model") or "openai/gpt-4o",
         "messages": messages,
         "max_tokens": kwargs.get("max_tokens", 1000),
         "temperature": kwargs.get("temperature", 0.7),
@@ -83,26 +83,32 @@ def call_openrouter(messages: list, model: str | None = None, **kwargs) -> Dict[
         raise RuntimeError(f"OpenRouter error {e.response.status_code}")
 
 def call_openrouter_images(prompt: str, **kwargs) -> Dict[str, Any]:
-    """Call gemini-2.5-flash-image-preview for image generation via chat completions."""
-    # User confirmed this model generates images through chat completions, not /images endpoint
-    model = kwargs.get("model", "google/gemini-2.5-flash-image-preview")
-    n = kwargs.get("n", 1)
-    size = kwargs.get("size", "1024x1024")
-    
-    # Format prompt to request image generation
-    image_prompt = f"Generate {n} image(s) with size {size}: {prompt}"
-    
-    # Use chat completions API since that's how gemini-2.5-flash-image-preview works
-    return call_openrouter(
-        messages=[{"role": "user", "content": image_prompt}],
-        model=model,
-        max_tokens=4096  # More tokens for image response
-    )
+    """Sync OpenRouter images call (unit-test friendly)."""
+    import httpx
+    headers = _headers()
+    model = kwargs.get("model", "openrouter/gemini-2.5-flash-image")
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "n": kwargs.get("n", 1),
+        "size": kwargs.get("size", "1024x1024"),
+    }
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.post(
+                "https://openrouter.ai/api/v1/images",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"OpenRouter error {e.response.status_code}")
 
 def load_policy():  # minimal policy used by tests (can be patched)
     class _P:
         def model_for(self, task):
-            return "google/gemini-2.5-flash-image-preview"
+            return "openai/gpt-4o"
         def fallbacks_for(self, task):
             return []
         def timeout_ms_for(self, task):
@@ -160,9 +166,9 @@ async def async_call_task(task_type: str, messages: list, **kwargs) -> Dict[str,
         # Fallback minimal policy if file missing or unreadable
         policy = {
             "tasks": {
-                "planner": {"primary": "google/gemini-2.5-flash-image-preview", "fallbacks": []},
-                "critic": {"primary": "google/gemini-2.5-flash-image-preview", "fallbacks": []},
-                "image": {"primary": "google/gemini-2.5-flash-image-preview", "fallbacks": []},
+                "planner": {"primary": "openrouter/gpt-4o", "fallbacks": []},
+                "critic": {"primary": "openrouter/gpt-4o", "fallbacks": []},
+                "image": {"primary": "openrouter/gemini-2.5-flash-image", "fallbacks": []},
             },
             "timeouts_ms": {"default": 30000},  # 30 second default
             "retry": {"max_attempts": 2, "backoff_ms": 400},
@@ -189,7 +195,7 @@ async def async_call_task(task_type: str, messages: list, **kwargs) -> Dict[str,
     
     # Final model (explicit override wins)
     # Remove any "openrouter/" prefix if present - OpenRouter doesn't expect it
-    model = kwargs.get("model", primary_model or "google/gemini-2.5-flash-image-preview")
+    model = kwargs.get("model", primary_model or "openai/gpt-4o")
     if model and model.startswith("openrouter/"):
         model = model.replace("openrouter/", "")
     

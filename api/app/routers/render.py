@@ -338,18 +338,14 @@ async def render(
             idem_redis_key = f"idemp:render:{idempotency_key}:{request.project_id}:{body_hash}"
             lock_key = f"{idem_redis_key}:lock"
             
-            try:
-                r = get_redis_client()
-                # Try to acquire lock for idempotency processing
-                lock_acquired = r.set(lock_key, "1", ex=300, nx=True)  # 5 minute lock
-            except Exception as e:
-                logger.warning(f"Redis connection failed for idempotency: {e}")
-                r = None
-                lock_acquired = False
+            r = get_redis_client()
+            
+            # Try to acquire lock for idempotency processing
+            lock_acquired = r.set(lock_key, "1", ex=300, nx=True)  # 5 minute lock
             
             try:
                 # Check for cached response
-                cached = r.get(idem_redis_key) if r else None
+                cached = r.get(idem_redis_key)
                 if cached:
                     try:
                         response = _json.loads(cached)
@@ -358,14 +354,13 @@ async def render(
                     except Exception as e:
                         logger.warning(f"Corrupted idempotency cache for key {idempotency_key}: {e}")
                         # Clear corrupted cache entry atomically
-                        if r:
-                            r.delete(idem_redis_key)
+                        r.delete(idem_redis_key)
                 
                 # If we don't have the lock and no cached response, wait briefly and retry once
                 if not lock_acquired:
                     import time
                     time.sleep(0.1)  # Brief wait
-                    cached = r.get(idem_redis_key) if r else None
+                    cached = r.get(idem_redis_key)
                     if cached:
                         try:
                             return _json.loads(cached)
@@ -469,24 +464,17 @@ async def render(
         user_prompt = _make_planner_prompt(request)
         
         # Use atomic cache to prevent race conditions
-        try:
-            from ..services.redis_atomic import get_atomic_cache
-            atomic_cache = get_atomic_cache()
-        except Exception as e:
-            logger.warning(f"Atomic cache unavailable: {e}")
-            atomic_cache = None
+        from ..services.redis_atomic import get_atomic_cache
+        atomic_cache = get_atomic_cache()
         
         # Generate deterministic cache key
-        if atomic_cache:
-            cache_key = atomic_cache.generate_cache_key(
-                "plan",
-                request.project_id,
-                request.prompts.instruction,
-                request.prompts.task,
-                request.constraints.model_dump(exclude_none=True) if request.constraints else None
-            )
-        else:
-            cache_key = None
+        cache_key = atomic_cache.generate_cache_key(
+            "plan",
+            request.project_id,
+            request.prompts.instruction,
+            request.prompts.task,
+            request.constraints.model_dump(exclude_none=True) if request.constraints else None
+        )
         
         async def generate_plan():
             """Async factory to generate plan (called only on cache miss)."""
@@ -535,16 +523,15 @@ async def render(
                     plan_local = safe_json_parse(json_content, "extracted_planner_response", fallback=None)
 
             if not isinstance(plan_local, dict):
-                # Fallback: create a simple plan if the model doesn't return JSON
-                logger.warning(f"Planner returned non-JSON, creating fallback plan. Content: {str(content)[:200]}")
-                plan_local = {
-                    "goal": f"Create {request.prompts.instruction}",
-                    "ops": ["style_transfer", "text_overlay"],
-                    "safety": {
-                        "respect_logo_safe_zone": True,
-                        "palette_only": bool(request.constraints and request.constraints.palette_hex)
-                    }
-                }
+                pass  # Planner returned invalid response
+                raise GuardrailsValidationException(
+                    contract_name="render_plan.json",
+                    errors=[
+                        "Planner did not return valid JSON object",
+                        f"Response type: {type(plan_local).__name__}",
+                        f"Content preview: {str(content)[:100]}..."
+                    ]
+                )
 
             try:
                 validate_contract("render_plan.json", plan_local)
@@ -559,16 +546,12 @@ async def render(
             return plan_local
         
         # Use atomic cache with lock to prevent thundering herd
-        if atomic_cache and cache_key:
-            plan = await atomic_cache.async_get_with_lock(
-                cache_key,
-                generate_plan,
-                ttl=86400,
-                use_stale=True
-            )
-        else:
-            # Fallback: generate without cache
-            plan = await generate_plan()
+        plan = await atomic_cache.async_get_with_lock(
+            cache_key,
+            generate_plan,
+            ttl=86400,
+            use_stale=True
+        )
         
         guardrails_ok = True
 
@@ -737,23 +720,17 @@ async def render(
     # Store idempotent response with proper serialization and atomic operations
     if idempotency_key and idem_redis_key:
         try:
-            try:
-                r = get_redis_client()
-            except Exception as e:
-                logger.warning(f"Redis unavailable for idempotency storage: {e}")
-                r = None
-                
-            if r:
-                lock_key = f"{idem_redis_key}:lock"
-                
-                # Use consistent JSON serialization
-                response_json = json.dumps(result, separators=(',', ':'), sort_keys=True)
-                
-                # Store response atomically
-                pipe = r.pipeline()
-                pipe.setex(idem_redis_key, 86400, response_json)  # 24 hour TTL
-                pipe.delete(lock_key)  # Release lock
-                pipe.execute()
+            r = get_redis_client()
+            lock_key = f"{idem_redis_key}:lock"
+            
+            # Use consistent JSON serialization
+            response_json = json.dumps(result, separators=(',', ':'), sort_keys=True)
+            
+            # Store response atomically
+            pipe = r.pipeline()
+            pipe.setex(idem_redis_key, 86400, response_json)  # 24 hour TTL
+            pipe.delete(lock_key)  # Release lock
+            pipe.execute()
             
             logger.debug(f"Stored idempotency response for key {idempotency_key}")
         except Exception as e:

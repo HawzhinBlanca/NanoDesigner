@@ -104,9 +104,23 @@ def estimate_cost_from_tokens(model: str, prompt_tokens: int, completion_tokens:
     # Simplified pricing model - in production, this should be more comprehensive
     # and regularly updated
     pricing = {
-        # Gemini 2.5 Flash Image Preview - the only model we use
-        "google/gemini-2.5-flash-image-preview": {"prompt": 0.075, "completion": 0.3},  # Image generation
-        "gemini-2.5-flash-image-preview": {"prompt": 0.075, "completion": 0.3},  # Alternate name
+        # GPT models (per 1K tokens)
+        "openrouter/gpt-4": {"prompt": 0.03, "completion": 0.06},
+        "openrouter/gpt-4-turbo": {"prompt": 0.01, "completion": 0.03},
+        "openrouter/gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
+        
+        # Claude models
+        "openrouter/claude-3-opus": {"prompt": 0.015, "completion": 0.075},
+        "openrouter/claude-3-sonnet": {"prompt": 0.003, "completion": 0.015},
+        "openrouter/claude-3-haiku": {"prompt": 0.00025, "completion": 0.00125},
+        
+        # Gemini models
+        "openrouter/gemini-pro": {"prompt": 0.0005, "completion": 0.0015},
+        "openrouter/gemini-2.5-flash-image": {"prompt": 0.075, "completion": 0.3},  # Image generation
+        
+        # DeepSeek models
+        "openrouter/deepseek-v3": {"prompt": 0.00014, "completion": 0.00028},
+        "openrouter/deepseek-v3.1": {"prompt": 0.00014, "completion": 0.00028},
     }
     
     # Get pricing for the model
@@ -170,10 +184,18 @@ def estimate_image_cost(model: str, n_images: int) -> float:
     except (ValueError, TypeError):
         n_images = 1
     
-    # Image generation pricing (per image) - only gemini-2.5-flash-image-preview
+    # Image generation pricing (per image) - updated with realistic estimates
     image_pricing = {
-        "google/gemini-2.5-flash-image-preview": 0.04,
-        "gemini-2.5-flash-image-preview": 0.04,  # Support both with and without prefix
+        "openrouter/gemini-2.5-flash-image": 0.04,
+        "gemini-2.5-flash-image": 0.04,  # Support both with and without prefix
+        "openrouter/dall-e-3": 0.08,
+        "dall-e-3": 0.08,
+        "openrouter/dall-e-2": 0.02,
+        "dall-e-2": 0.02,
+        "openrouter/stable-diffusion-xl": 0.01,
+        "stable-diffusion-xl": 0.01,
+        "openrouter/midjourney": 0.05,
+        "midjourney": 0.05,
     }
     
     # Clean model name - remove openrouter prefix if present
