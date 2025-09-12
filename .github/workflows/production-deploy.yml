@@ -7,7 +7,7 @@ on:
 
 env:
   NODE_VERSION: '20'
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.12'
 
 jobs:
   # Quality gates
@@ -17,37 +17,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: 'pnpm'
       
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
       
-      - name: Install dependencies
+      - name: Install dependencies (frontend/backend)
         run: |
-          npm ci
-          cd api && pip install -r requirements.txt
+          pnpm install --frozen-lockfile
+          pipx install poetry
+          cd api && poetry install --with dev
       
       - name: Run linting
         run: |
-          npm run lint
-          cd api && ruff check .
+          pnpm -C apps/web lint
+          cd api && poetry run ruff check .
       
       - name: Run type checking
         run: |
-          npm run typecheck
-          cd api && mypy .
+          pnpm -C apps/web typecheck
+          cd api && poetry run mypy app
       
       - name: Run tests
         run: |
-          npm test -- --coverage
-          cd api && pytest --cov=app --cov-report=xml
+          pnpm -C apps/web test -- --coverage
+          cd api && poetry run pytest --cov=app --cov-report=xml
       
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
@@ -96,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [web, api, worker]
+        service: [web, api]
     steps:
       - uses: actions/checkout@v4
       
@@ -113,7 +117,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./docker/Dockerfile.${{ matrix.service }}
+          file: ./docker/${{ matrix.service }}.Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/nanodesigner-${{ matrix.service }}:latest

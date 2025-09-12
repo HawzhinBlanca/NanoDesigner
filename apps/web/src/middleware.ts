@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-// Simplified middleware without crypto module for edge runtime compatibility
+// Edge runtime compatible middleware without Node.js crypto
 export function middleware(req: NextRequest) {
   const res = NextResponse.next();
   
