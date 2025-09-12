@@ -147,12 +147,10 @@ jobs:
           # Update image tags
           kubectl set image deployment/web web=${{ secrets.DOCKER_USERNAME }}/nanodesigner-web:${{ github.sha }} -n staging
           kubectl set image deployment/api api=${{ secrets.DOCKER_USERNAME }}/nanodesigner-api:${{ github.sha }} -n staging
-          kubectl set image deployment/worker worker=${{ secrets.DOCKER_USERNAME }}/nanodesigner-worker:${{ github.sha }} -n staging
           
           # Wait for rollout
           kubectl rollout status deployment/web -n staging
           kubectl rollout status deployment/api -n staging
-          kubectl rollout status deployment/worker -n staging
       
       - name: Run smoke tests
         run: |
@@ -189,12 +187,10 @@ jobs:
           # Deploy to green environment
           kubectl set image deployment/web-green web=${{ secrets.DOCKER_USERNAME }}/nanodesigner-web:${{ github.sha }} -n production
           kubectl set image deployment/api-green api=${{ secrets.DOCKER_USERNAME }}/nanodesigner-api:${{ github.sha }} -n production
-          kubectl set image deployment/worker-green worker=${{ secrets.DOCKER_USERNAME }}/nanodesigner-worker:${{ github.sha }} -n production
           
           # Wait for green deployment
           kubectl rollout status deployment/web-green -n production
           kubectl rollout status deployment/api-green -n production
-          kubectl rollout status deployment/worker-green -n production
           
           # Run health checks
           ./scripts/health-check.sh green
@@ -210,7 +206,6 @@ jobs:
           # Update blue environment for next deployment
           kubectl set image deployment/web-blue web=${{ secrets.DOCKER_USERNAME }}/nanodesigner-web:${{ github.sha }} -n production
           kubectl set image deployment/api-blue api=${{ secrets.DOCKER_USERNAME }}/nanodesigner-api:${{ github.sha }} -n production
-          kubectl set image deployment/worker-blue worker=${{ secrets.DOCKER_USERNAME }}/nanodesigner-worker:${{ github.sha }} -n production
       
       - name: Update deployment status
         if: always()
