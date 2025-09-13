@@ -5,13 +5,14 @@
 import { sanitizeInput, VALIDATION_LIMITS } from '@/lib/validation/schemas';
 
 // API Configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002';
 const API_TIMEOUT = 30000; // 30 seconds
 
 // Types for API requests and responses
 export interface RenderRequest {
   project_id: string;
   prompts: {
+    task: string;
     instruction: string;
     references?: string[];
   };
@@ -143,12 +144,13 @@ export class RenderAPIClient {
         ? btoa(`/render:${Date.now()}:${Math.random()}`)
         : Buffer.from(`/render:${Date.now()}:${Math.random()}`).toString('base64');
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey,
+      };
       const response = await this.makeRequest('/render', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idemKey,
-        },
+        headers,
         body: JSON.stringify(requestPayload),
       });
 
@@ -164,10 +166,10 @@ export class RenderAPIClient {
 
       const result = await response.json();
       
-      // Handle both old and new API response formats
+      // Handle the actual API response format
       let formattedResult: RenderResponse;
       
-      // Check if it's the new format with assets
+      // The backend returns { assets: [...], audit: {...} }
       if (result.assets && Array.isArray(result.assets)) {
         formattedResult = {
           render_id: result.audit?.trace_id || `render_${Date.now()}`,
@@ -191,14 +193,15 @@ export class RenderAPIClient {
             total_cost_usd: result.audit?.cost_usd || 0,
             breakdown: {}
           },
-          processing_time_ms: Date.now() - (requestSize * 0.001),
+          // Backend does not return processing time; set 0 and let UI compute if needed
+          processing_time_ms: 0,
           security_scan: {
             threat_level: 'low',
             confidence: 0.95
           },
           metadata: {
-            model_used: result.audit?.model_route || 'openrouter/openai/gpt-4o',
-            image_model: 'dall-e-3',
+            model_used: result.audit?.model_route || 'openai/gpt-4o',
+            image_model: 'google/gemini-2.5-flash-image-preview',
             api_version: '1.0.0'
           }
         };

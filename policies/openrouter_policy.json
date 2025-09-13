@@ -1,10 +1,10 @@
 {
   "tasks": {
-    "planner": { "primary": "openai/gpt-4o", "fallbacks": ["anthropic/claude-3.5-sonnet"], "max_cost_usd": 0.02 },
-    "critic": { "primary": "anthropic/claude-3.5-sonnet", "fallbacks": ["openai/gpt-4o"], "max_cost_usd": 0.02 },
-    "draft":  { "primary": "openai/gpt-4o-mini", "fallbacks": ["openai/gpt-3.5-turbo"], "max_cost_usd": 0.005 },
-    "image":  { "primary": "openai/dall-e-3", "max_cost_usd": 0.10 },
-    "canon":  { "primary": "openai/gpt-4o", "fallbacks": ["anthropic/claude-3.5-sonnet"], "max_cost_usd": 0.02 }
+    "planner": { "primary": "openrouter/gpt-5", "fallbacks": ["openrouter/claude-4.1"], "max_cost_usd": 0.02 },
+    "critic": { "primary": "openrouter/claude-4.1", "fallbacks": ["openrouter/gpt-5"], "max_cost_usd": 0.02 },
+    "draft":  { "primary": "openrouter/deepseek-v3.1", "fallbacks": ["openrouter/gpt-5-mini"], "max_cost_usd": 0.005 },
+    "image":  { "primary": "openrouter/gemini-2.5-flash-image-preview", "max_cost_usd": 0.10 },
+    "canon":  { "primary": "openrouter/gpt-5", "fallbacks": ["openrouter/claude-4.1"], "max_cost_usd": 0.02 }
   },
   "retry": { "max_attempts": 2, "backoff_ms": 400 },
   "timeouts_ms": { "default": 20000, "image": 45000 },

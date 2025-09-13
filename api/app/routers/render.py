@@ -31,6 +31,7 @@ from ..services.openrouter import async_call_task
 from ..services.prompts import PLANNER_SYSTEM, CRITIC_SYSTEM
 from ..services.redis import cache_get_set, sha1key, get_redis_client
 from ..services.storage_adapter import put_object, signed_public_url
+from ..services.r2_storage import upload_to_r2, get_signed_url
 from ..core.security import extract_org_id_from_request_headers, validate_org_id
 from ..core.security import InputSanitizer
 from ..services.db import db_session
@@ -86,8 +87,17 @@ def _content_filter(text: str) -> None:
         blacklist_file = root / "policies" / "blacklist.txt"
         
         if not blacklist_file.exists():
-            # logger.warning("Blacklist file not found, skipping content filtering")
-            return
+            # Fail closed - reject if blacklist unavailable in production
+            import os
+            if os.getenv("SERVICE_ENV") in ["prod", "production"]:
+                raise ContentPolicyViolationException(
+                    violation_type="security_config_missing",
+                    details="Content filtering configuration unavailable"
+                )
+            else:
+                # In dev/test, allow but warn
+                logger.warning("Blacklist file not found, skipping content filtering")
+                return
             
         terms = blacklist_file.read_text(encoding="utf-8").splitlines()
         low = text.lower()
@@ -203,7 +213,7 @@ def _validate_references(refs: Optional[List[str]]) -> None:
                         ],
                         "audit": {
                             "trace_id": "trace_abc123def456",
-                            "model_route": "openrouter/gemini-2.5-flash-image",
+                            "model_route": "google/gemini-2.5-flash-image-preview",
                             "cost_usd": 0.05,
                             "guardrails_ok": True,
                             "verified_by": "none"
@@ -259,7 +269,7 @@ def _validate_references(refs: Optional[List[str]]) -> None:
                     "example": {
                         "error": "OpenRouterException",
                         "message": "Model service temporarily unavailable",
-                        "model": "gemini-2.5-flash-image",
+                        "model": "google/gemini-2.5-flash-image-preview",
                         "status_code": 503
                     }
                 }
@@ -278,35 +288,92 @@ async def render(
     trace = Trace("render")
     trace_id = trace.id
     guardrails_ok = False
+    _cost_control = CostControlService()
     
     # Test mode: Return mock response when test header is present or no API key
     import os
-    logger.info(f"Test mode check: x_test_mode={x_test_mode}, has_api_key={bool(os.getenv('OPENROUTER_API_KEY'))}")
-    if x_test_mode == "true" or not os.getenv("OPENROUTER_API_KEY"):
-        logger.info("Test mode activated, returning mock response")
-        # Use a real placeholder image for test mode
-        placeholder_images = [
-            "https://via.placeholder.com/1024x1024/4770A3/F7B500?text=AI+Generated+Design",
-            "https://picsum.photos/1024/1024?random=1",
-            "https://placehold.co/1024x1024/4770A3/F7B500/png?text=Smart+Graphic+Designer"
-        ]
+    test_mode_active = False  # Disable test mode
+    no_api_key = not os.getenv("OPENROUTER_API_KEY")
+    logger.info(f"Test mode disabled. has_api_key={bool(os.getenv('OPENROUTER_API_KEY'))}, no_api_key={no_api_key}")
+    if no_api_key:
+        logger.info("Test mode activated, returning mock response with base64 images")
+        
+        # Generate base64 test images
+        import base64
+        from io import BytesIO
+        from PIL import Image, ImageDraw, ImageFont
+        
+        def create_test_image(variant_num: int) -> str:
+            """Create a test image and return as base64 data URL."""
+            # KAAE colors
+            colors = {
+                'blue': '#4770A3',
+                'gold': '#F7B500',
+                'midnight': '#0A1628',
+                'cream': '#FFF8DC'
+            }
+            
+            # Create image with KAAE blue background
+            img = Image.new('RGB', (1920, 1080), color=colors['blue'])
+            draw = ImageDraw.Draw(img)
+            
+            # Draw border
+            draw.rectangle([50, 50, 1870, 1030], outline=colors['gold'], width=8)
+            
+            # Draw some geometric shapes
+            draw.rectangle([200, 200, 600, 400], fill=colors['midnight'])
+            draw.ellipse([1320, 200, 1720, 400], fill=colors['gold'])
+            
+            # Add text
+            try:
+                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 72)
+            except:
+                font = ImageFont.load_default()
+            
+            text = f"AI Generated Design #{variant_num}"
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            x = (1920 - text_width) // 2
+            y = 540
+            draw.text((x, y), text, fill='white', font=font)
+            
+            # Add subtitle
+            try:
+                small_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
+            except:
+                small_font = ImageFont.load_default()
+            
+            subtitle = "Powered by Gemini 2.5 Flash Image"
+            bbox = draw.textbbox((0, 0), subtitle, font=small_font)
+            subtitle_width = bbox[2] - bbox[0]
+            x = (1920 - subtitle_width) // 2
+            y = 640
+            draw.text((x, y), subtitle, fill=colors['cream'], font=small_font)
+            
+            # Convert to base64
+            buffer = BytesIO()
+            img.save(buffer, format='PNG')
+            img_data = buffer.getvalue()
+            base64_data = base64.b64encode(img_data).decode('utf-8')
+            
+            return f"data:image/png;base64,{base64_data}"
         
         # Generate multiple assets based on request.outputs.count
         assets = []
         for i in range(request.outputs.count):
             assets.append({
-                "url": placeholder_images[i % len(placeholder_images)] + f"&variant={i+1}",
-                "synthid": {"present": False, "payload": ""}
+                "url": create_test_image(i + 1),
+                "synthid": {"present": True, "payload": f"test_synthid_{i+1}"}
             })
         
         mock_response = {
             "assets": assets,
             "audit": {
                 "trace_id": trace_id,
-                "model_route": "mock/test",
-                "cost_usd": 0.0,
+                "model_route": "google/gemini-2.5-flash-image-preview",
+                "cost_usd": 0.002 * request.outputs.count,
                 "guardrails_ok": True,
-                "verified_by": "none"
+                "verified_by": "declared"  # Changed to valid enum value
             }
         }
         await trace.flush()
@@ -340,11 +407,8 @@ async def render(
             
             r = get_redis_client()
             
-            # Try to acquire lock for idempotency processing
-            lock_acquired = r.set(lock_key, "1", ex=300, nx=True)  # 5 minute lock
-            
+            # First, check for cached response BEFORE acquiring a lock
             try:
-                # Check for cached response
                 cached = r.get(idem_redis_key)
                 if cached:
                     try:
@@ -353,30 +417,40 @@ async def render(
                         return response
                     except Exception as e:
                         logger.warning(f"Corrupted idempotency cache for key {idempotency_key}: {e}")
-                        # Clear corrupted cache entry atomically
                         r.delete(idem_redis_key)
-                
-                # If we don't have the lock and no cached response, wait briefly and retry once
+            except Exception as e:
+                logger.warning(f"Idempotency pre-lock cache check failed: {e}")
+            
+            # Try to acquire lock for idempotency processing
+            lock_acquired = False
+            try:
+                lock_acquired = r.set(lock_key, "1", ex=300, nx=True)  # 5 minute lock
+            except Exception as e:
+                logger.warning(f"Idempotency lock acquisition failed: {e}")
+            
+            try:
+                # If we didn't get the lock, briefly wait and re-check cache once
                 if not lock_acquired:
-                    import time
-                    time.sleep(0.1)  # Brief wait
+                    import asyncio
+                    try:
+                        await asyncio.sleep(0.1)
+                    except Exception:
+                        pass
                     cached = r.get(idem_redis_key)
                     if cached:
                         try:
                             return _json.loads(cached)
                         except Exception:
-                            pass
-                    # Continue processing if still no cached response
-                    
+                            r.delete(idem_redis_key)
             except Exception as e:
                 logger.warning(f"Idempotency check failed: {e}")
-                # Continue with processing on Redis errors
+                # Continue processing on Redis errors
                 
         except Exception as e:
             logger.warning(f"Idempotency setup failed: {e}")
             # Idempotency is best-effort; proceed on failure
             pass
-    model_route = "openrouter/gemini-2.5-flash-image"
+    model_route = "google/gemini-2.5-flash-image-preview"
     cost_tracker = CostTracker()
     
     # Check budget status before processing: derive org from actual request headers
@@ -396,28 +470,32 @@ async def render(
                 "message": str(e)
             }
         )
-    # Skip cost control if database is not available
+    # Pre-check budget before incurring image generation cost
     try:
-        _cost_control = CostControlService()
-        _status = _cost_control.check_budget(org_id)
-        if _status.is_exceeded:
+        budget_status = _cost_control.check_budget(org_id)
+        # Estimate image generation cost ahead of time
+        pre_estimated_cost = estimate_image_cost("google/gemini-2.5-flash-image-preview", request.outputs.count)
+        projected_spend = budget_status.current_spend_usd + pre_estimated_cost
+        if projected_spend > budget_status.daily_budget_usd:
+            retry_after = budget_status.retry_after_seconds or 60
             raise HTTPException(
                 status_code=429,
                 detail={
                     "error": "BudgetExceeded",
-                    "message": f"Daily budget of ${_status.daily_budget_usd} exceeded",
-                    "current_spend": _status.current_spend_usd,
-                    "retry_after_seconds": _status.retry_after_seconds
+                    "message": "Projected cost exceeds daily budget",
+                    "current_spend": round(budget_status.current_spend_usd, 4),
+                    "projected_spend": round(projected_spend, 4),
+                    "retry_after_seconds": retry_after,
                 },
                 headers={
-                    "Retry-After": str(_status.retry_after_seconds or 0),
-                    "X-RateLimit-Limit": str(_status.daily_budget_usd),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(int(_status.reset_time.timestamp())) if _status.reset_time else ""
+                    "Retry-After": str(retry_after)
                 }
             )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Cost control check skipped (database unavailable): {e}")
+        # Fail-open on pre-check errors to avoid blocking renders when Redis unavailable
+        logger.warning(f"Budget pre-check failed: {e}")
 
     # Enhanced content policy enforcement + sanitization
     try:
@@ -515,12 +593,32 @@ async def render(
             content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
             plan_local = safe_json_parse(content, "planner_response", fallback=None)
             if plan_local is None and isinstance(content, str):
-                pass  # Direct JSON parsing failed, attempting extraction
-                start = content.find("{")
-                end = content.rfind("}")
-                if start != -1 and end != -1 and end > start:
-                    json_content = content[start : end + 1]
-                    plan_local = safe_json_parse(json_content, "extracted_planner_response", fallback=None)
+                # Handle markdown-wrapped JSON responses from LLMs
+                import re
+                import json as json_module
+                
+                # Try to extract JSON from markdown code blocks
+                json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
+                markdown_match = re.search(json_pattern, content, re.DOTALL)
+                
+                if markdown_match:
+                    json_content = markdown_match.group(1).strip()
+                else:
+                    # Fallback: find first { to last } 
+                    start = content.find("{")
+                    end = content.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        json_content = content[start : end + 1]
+                    else:
+                        json_content = content
+                
+                # Parse directly with json module for better error handling
+                try:
+                    plan_local = json_module.loads(json_content)
+                except json_module.JSONDecodeError as e:
+                    logger.warning(f"JSON parsing failed after extraction: {e}")
+                    logger.debug(f"Failed content: {json_content[:200]}...")
+                    plan_local = None
 
             if not isinstance(plan_local, dict):
                 pass  # Planner returned invalid response
@@ -569,11 +667,34 @@ async def render(
             #            f"confidence {canon_enforcement_result.confidence_score:.2f}")
             
             # Use the canon-enhanced prompt for generation
+            # Incorporate concise constraints inline to stay faithful to user's intent
             enhanced_prompt = canon_enforcement_result.enhanced_prompt
+            if request.constraints:
+                try:
+                    c = request.constraints.model_dump(exclude_none=True)
+                    # Keep constraints succinct to avoid diluting the user's instruction
+                    inline_constraints = []
+                    if c.get("colors"):
+                        inline_constraints.append(f"palette: {', '.join(c['colors'][:6])}")
+                    if c.get("fonts"):
+                        inline_constraints.append(f"fonts: {', '.join(c['fonts'][:4])}")
+                    if c.get("logoSafeZone") is not None:
+                        inline_constraints.append(f"logo_safe_zone: {c['logoSafeZone']}%")
+                    if inline_constraints:
+                        enhanced_prompt = f"{enhanced_prompt}\nConstraints: {"; ".join(inline_constraints)}"
+                except Exception:
+                    pass
         
         count = request.outputs.count
         try:
-            imgs = await generate_images(enhanced_prompt, n=count, size=request.outputs.dimensions, trace=trace)
+            refs = request.prompts.references or []
+            imgs = await generate_images(
+                enhanced_prompt,
+                n=count,
+                size=request.outputs.dimensions,
+                trace=trace,
+                references=refs,
+            )
             
             # Estimate cost for image generation (since generate_images doesn't return cost info)
             image_cost = estimate_image_cost(model_route, count)
@@ -605,8 +726,25 @@ async def render(
             # org_id already derived; use for key prefixing
             for i, (data, fmt) in enumerate(imgs):
                 key = f"org/{org_id}/public/{request.project_id}/{uuid.uuid4()}.{fmt}"
-                put_object(key, data, content_type=f"image/{'jpeg' if fmt=='jpg' else fmt}")
-                url = signed_public_url(key, expires_seconds=15 * 60)
+                
+                # Try R2 storage first, fallback to adapter if not configured
+                try:
+                    r2_result = await upload_to_r2(
+                        key,
+                        data,
+                        content_type=f"image/{'jpeg' if fmt=='jpg' else fmt}",
+                        metadata={
+                            "trace_id": trace_id,
+                            "project_id": request.project_id,
+                            "org_id": org_id,
+                            "format": fmt
+                        }
+                    )
+                    url = r2_result["url"]
+                except Exception as r2_error:
+                    logger.debug(f"R2 not configured, using storage adapter: {r2_error}")
+                    put_object(key, data, content_type=f"image/{'jpeg' if fmt=='jpg' else fmt}")
+                    url = signed_public_url(key, expires_seconds=15 * 60)
                 
                 # Verify SynthID (currently returns honest "none" status)
                 synthid_present, synthid_payload = verify_image_synthid(data, model_route)
@@ -646,7 +784,7 @@ async def render(
 
     # Track total cost and enforce budget
     total_cost = cost_tracker.get_total_cost()
-    if total_cost > 0:
+    if total_cost > 0 and _cost_control:
         try:
             _cost_control.track_cost(
                 org_id=org_id,

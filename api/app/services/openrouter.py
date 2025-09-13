@@ -63,6 +63,8 @@ async def health_check() -> bool:
 def call_openrouter(messages: list, model: str | None = None, **kwargs) -> Dict[str, Any]:
     """Sync OpenRouter call (unit-test friendly: uses httpx.Client)."""
     import httpx
+    from ..core.config import settings
+    
     headers = _headers()
     payload = {
         "model": model or kwargs.get("model") or "openai/gpt-4o",
@@ -70,8 +72,12 @@ def call_openrouter(messages: list, model: str | None = None, **kwargs) -> Dict[
         "max_tokens": kwargs.get("max_tokens", 1000),
         "temperature": kwargs.get("temperature", 0.7),
     }
+    
+    # Use configured timeout with proper minimum
+    timeout = max(settings.openrouter_timeout, settings.min_timeout_seconds, 30.0)
+    
     try:
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=timeout) as client:
             resp = client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers,
@@ -86,7 +92,7 @@ def call_openrouter_images(prompt: str, **kwargs) -> Dict[str, Any]:
     """Sync OpenRouter images call (unit-test friendly)."""
     import httpx
     headers = _headers()
-    model = kwargs.get("model", "openrouter/gemini-2.5-flash-image")
+    model = kwargs.get("model", "google/gemini-2.5-flash-image-preview")
     payload = {
         "model": model,
         "prompt": prompt,
@@ -94,16 +100,32 @@ def call_openrouter_images(prompt: str, **kwargs) -> Dict[str, Any]:
         "size": kwargs.get("size", "1024x1024"),
     }
     try:
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=30.0) as client:  # Increased timeout for image generation
             resp = client.post(
                 "https://openrouter.ai/api/v1/images",
                 headers=headers,
                 json=payload,
             )
             resp.raise_for_status()
-            return resp.json()
+            
+            # Check if response has content
+            content = resp.text
+            if not content or content.strip() == "":
+                raise RuntimeError(f"Empty response from OpenRouter Images API")
+            
+            try:
+                return resp.json()
+            except ValueError as e:
+                # Log the actual response content for debugging
+                raise RuntimeError(f"Invalid JSON response from OpenRouter Images API: {e}. Content: {content[:500]}")
+                
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"OpenRouter error {e.response.status_code}")
+        error_text = e.response.text if hasattr(e.response, 'text') else str(e)
+        raise RuntimeError(f"OpenRouter Images API HTTP error {e.response.status_code}: {error_text}")
+    except httpx.TimeoutException:
+        raise RuntimeError("OpenRouter Images API request timed out")
+    except Exception as e:
+        raise RuntimeError(f"OpenRouter Images API request failed: {str(e)}")
 
 def load_policy():  # minimal policy used by tests (can be patched)
     class _P:
@@ -166,11 +188,11 @@ async def async_call_task(task_type: str, messages: list, **kwargs) -> Dict[str,
         # Fallback minimal policy if file missing or unreadable
         policy = {
             "tasks": {
-                "planner": {"primary": "openrouter/gpt-4o", "fallbacks": []},
-                "critic": {"primary": "openrouter/gpt-4o", "fallbacks": []},
-                "image": {"primary": "openrouter/gemini-2.5-flash-image", "fallbacks": []},
+                "planner": {"primary": "openrouter/gpt-5", "fallbacks": ["openrouter/claude-4.1"]},
+                "critic": {"primary": "openrouter/claude-4.1", "fallbacks": ["openrouter/gpt-5"]},
+                "image": {"primary": "google/gemini-2.5-flash-image-preview", "fallbacks": []},
             },
-            "timeouts_ms": {"default": 30000},  # 30 second default
+            "timeouts_ms": {"default": 30000, "image": 45000},
             "retry": {"max_attempts": 2, "backoff_ms": 400},
         }
     task_cfg = (policy.get("tasks", {}) or {}).get(task_type) or {}
@@ -194,8 +216,10 @@ async def async_call_task(task_type: str, messages: list, **kwargs) -> Dict[str,
     timeout_seconds = max(settings.min_timeout_seconds, task_timeout_ms / 1000.0)
     
     # Final model (explicit override wins)
-    # Remove any "openrouter/" prefix if present - OpenRouter doesn't expect it
+    # Only remove "openrouter/" prefix if present - OpenRouter doesn't expect it
+    # But keep other prefixes like "google/" or "openai/"
     model = kwargs.get("model", primary_model or "openai/gpt-4o")
+    logger.info(f"async_call_task: task_type={task_type}, model from kwargs/policy={model}")
     if model and model.startswith("openrouter/"):
         model = model.replace("openrouter/", "")
     
@@ -236,9 +260,13 @@ async def async_call_task(task_type: str, messages: list, **kwargs) -> Dict[str,
                 async def _do_request():
                     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                         request_payload = {**payload, "model": candidate}
-                        # Log the payload for debugging
-                        import json
-                        logger.info(f"OpenRouter request payload: {json.dumps(request_payload, default=str)[:500]}")
+                        # Log minimal info without prompt contents unless explicitly enabled
+                        import json, os
+                        if os.getenv("OPENROUTER_DEBUG") == "1":
+                            safe_payload = {**request_payload, "messages": "[redacted]"}
+                            logger.debug(f"OpenRouter request payload: {json.dumps(safe_payload, default=str)[:500]}")
+                        else:
+                            logger.debug(f"OpenRouter request: task={task_type}, model={candidate}")
                         return await client.post(
                             "https://openrouter.ai/api/v1/chat/completions",
                             headers=headers,

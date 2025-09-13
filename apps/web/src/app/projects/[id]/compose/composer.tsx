@@ -45,7 +45,7 @@ import { estimateRenderTime } from "@/lib/api/render";
 const MAX_VARIANTS = 8;
 const MIN_VARIANTS = 1;
 const DEFAULT_LOGO_SAFE_ZONE_PCT = 20.0;
-const MAX_PROMPT_LENGTH = 5000;
+const MAX_PROMPT_LENGTH = 2000;
 
 const CompareGrid = dynamic(
   () => import("@/components/compare/CompareGrid")
@@ -123,14 +123,23 @@ export default function Composer({ projectId }: { projectId: string }) {
     setCurrentStep('');
     setRenderError('Generation cancelled by user');
     
-    // Mark all generating variants as failed
+    // Mark all generating variants as failed (using immutable update)
     const freshVariants = useComposerStore.getState().variants;
-    freshVariants.forEach(variant => {
+    const updatedVariants = freshVariants.map(variant => {
       if (variant.status === 'generating') {
-        updateVariant(variant.id, {
-          status: 'failed',
+        return {
+          ...variant,
+          status: 'failed' as const,
           error: 'Cancelled',
-        });
+        };
+      }
+      return variant;
+    });
+    
+    // Update all variants at once
+    updatedVariants.forEach(variant => {
+      if (variant.status === 'failed' && variant.error === 'Cancelled') {
+        updateVariant(variant.id, variant);
       }
     });
   }, [setGenerating, setProgress, variants, updateVariant]);
@@ -173,11 +182,26 @@ export default function Composer({ projectId }: { projectId: string }) {
       if (isValidImageDataUrl) {
         // Additional validation: ensure base64 format is valid
         const base64Part = url.split(',')[1];
-        if (base64Part && base64Part.length > 100) { // Reasonable size check
-          return true;
+        if (base64Part && base64Part.length > 20) { // More lenient size check for any valid base64 image
+          // Proper base64 validation using atob
+          try {
+            // Attempt to decode the base64 string
+            // This will throw if the base64 is invalid
+            const decoded = atob(base64Part);
+            
+            // Additional check: decoded data should have reasonable size for an image
+            // Images are typically at least a few KB
+            if (decoded.length > 100) {
+              return true;
+            }
+          } catch (e) {
+            // Invalid base64 - atob throws on invalid input
+            console.warn('Invalid base64 image data:', e);
+            return false;
+          }
         }
       }
-      console.warn('Invalid or suspicious data URL format');
+      console.warn('Invalid or suspicious data URL format - URL:', url.substring(0, 100) + '...');
       return false;
     }
     
@@ -307,8 +331,14 @@ export default function Composer({ projectId }: { projectId: string }) {
       // Update variants with actual results
       // Get fresh variants from store after generateVariants was called
       const freshVariants = useComposerStore.getState().variants;
+      console.log('🔍 Fresh variants from store:', freshVariants);
+      console.log('🔍 Render result images:', renderResult.images);
+      
+      // Find the most recent variants (just created) and update them with results
+      const recentVariants = freshVariants.slice(-validatedCount);
       renderResult.images.forEach((image, index) => {
-        const variant = freshVariants[index];
+        const variant = recentVariants[index];
+        console.log(`🔍 Updating variant ${index}:`, variant?.id, 'with URL:', image.url);
         if (variant) {
           updateVariant(variant.id, {
             finalUrl: image.url,
@@ -317,6 +347,25 @@ export default function Composer({ projectId }: { projectId: string }) {
           });
         }
       });
+      
+      // Only duplicate images in explicit test mode
+      if (
+        process.env.NEXT_PUBLIC_TEST_MODE === '1' &&
+        renderResult.images.length < recentVariants.length &&
+        renderResult.images.length > 0
+      ) {
+        const firstImage = renderResult.images[0];
+        for (let i = renderResult.images.length; i < recentVariants.length; i++) {
+          const variant = recentVariants[i];
+          if (variant) {
+            updateVariant(variant.id, {
+              finalUrl: firstImage.url,
+              previewUrl: firstImage.url,
+              status: "completed" as const,
+            });
+          }
+        }
+      }
       
       // Select the first variant if we have images
       if (renderResult.images.length > 0 && freshVariants.length > 0) {
@@ -545,22 +594,28 @@ export default function Composer({ projectId }: { projectId: string }) {
               {/* Preview Tab */}
               {activeTab === "preview" && (
                 <div className="min-h-[500px] flex items-center justify-center bg-muted/20 rounded-lg">
-                  {(() => { const src = selectedVariant?.finalUrl || selectedVariant?.previewUrl; return src && isValidImageUrl(src); })() ? (
-                    <img
-                      src={(selectedVariant!.finalUrl || selectedVariant!.previewUrl) as string}
-                      alt="Generated image"
-                      className="max-w-full h-auto rounded-lg"
-                    />
-                  ) : (
-                    <div className="text-center">
-                      <Image className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground">
-                        {isGenerating
-                          ? "Generating preview..."
-                          : "No preview available. Generate variants to see results."}
-                      </p>
-                    </div>
-                  )}
+                  {(() => {
+                    const src = selectedVariant?.finalUrl || selectedVariant?.previewUrl;
+                    if (src && isValidImageUrl(src)) {
+                      return (
+                        <img
+                          src={src}
+                          alt="Generated image"
+                          className="max-w-full h-auto rounded-lg"
+                        />
+                      );
+                    }
+                    return (
+                      <div className="text-center">
+                        <Image className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                        <p className="text-muted-foreground">
+                          {isGenerating
+                            ? "Generating preview..."
+                            : "No preview available. Generate variants to see results."}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

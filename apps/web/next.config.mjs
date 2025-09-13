@@ -55,7 +55,13 @@ const baseConfig = {
   images: { 
     formats: ["image/avif", "image/webp"], 
     minimumCacheTTL: 60,
-    domains: ['via.placeholder.com', 'images.unsplash.com'],
+    domains: [
+      'via.placeholder.com',
+      'images.unsplash.com',
+      'placehold.co',
+      'picsum.photos',
+      'localhost'
+    ],
     dangerouslyAllowSVG: false,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;"
   },
@@ -73,9 +79,6 @@ const baseConfig = {
       },
     ];
   },
-  
-  // Enable SWC minification
-  swcMinify: true,
   
   // Optimize bundle
   experimental: {
