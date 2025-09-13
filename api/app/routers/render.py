@@ -667,11 +667,34 @@ async def render(
             #            f"confidence {canon_enforcement_result.confidence_score:.2f}")
             
             # Use the canon-enhanced prompt for generation
+            # Incorporate concise constraints inline to stay faithful to user's intent
             enhanced_prompt = canon_enforcement_result.enhanced_prompt
+            if request.constraints:
+                try:
+                    c = request.constraints.model_dump(exclude_none=True)
+                    # Keep constraints succinct to avoid diluting the user's instruction
+                    inline_constraints = []
+                    if c.get("colors"):
+                        inline_constraints.append(f"palette: {', '.join(c['colors'][:6])}")
+                    if c.get("fonts"):
+                        inline_constraints.append(f"fonts: {', '.join(c['fonts'][:4])}")
+                    if c.get("logoSafeZone") is not None:
+                        inline_constraints.append(f"logo_safe_zone: {c['logoSafeZone']}%")
+                    if inline_constraints:
+                        enhanced_prompt = f"{enhanced_prompt}\nConstraints: {"; ".join(inline_constraints)}"
+                except Exception:
+                    pass
         
         count = request.outputs.count
         try:
-            imgs = await generate_images(enhanced_prompt, n=count, size=request.outputs.dimensions, trace=trace)
+            refs = request.prompts.references or []
+            imgs = await generate_images(
+                enhanced_prompt,
+                n=count,
+                size=request.outputs.dimensions,
+                trace=trace,
+                references=refs,
+            )
             
             # Estimate cost for image generation (since generate_images doesn't return cost info)
             image_cost = estimate_image_cost(model_route, count)

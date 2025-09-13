@@ -94,25 +94,43 @@ def _ssrf_guard(url: str) -> None:
             raise ValueError("Blocked external host")
 
 
-async def generate_images(prompt: str, n: int = 1, size: str = "1024x1024", trace: Trace | None = None) -> List[Tuple[bytes, str]]:
+async def generate_images(
+    prompt: str,
+    n: int = 1,
+    size: str = "1024x1024",
+    trace: Trace | None = None,
+    references: List[str] | None = None,
+) -> List[Tuple[bytes, str]]:
     # Try actual image generation first
     images: List[Tuple[bytes, str]] = []
     
-    # Enhanced prompt for image generation
-    enhanced_prompt = f"""Generate an image based on this description: {prompt}
-
-Output format: Please generate a high-quality image that matches the description exactly."""
+    # Keep the prompt focused; add minimal instruction to adhere closely
+    enhanced_prompt = (
+        f"{prompt}\n\n"
+        f"Respond with high-fidelity imagery that matches the description and composition exactly."
+    )
 
     try:
         # Use chat completions for image generation with gemini-2.5-flash-image
+        # Build multimodal content if HTTPS references provided
+        user_content: List[dict] | str
+        valid_refs: List[str] = [r for r in (references or []) if isinstance(r, str) and r.startswith("https://")]
+        if valid_refs:
+            parts: List[dict] = [{"type": "text", "text": enhanced_prompt}]
+            for ref in valid_refs[:5]:  # cap references to avoid long payloads
+                parts.append({"type": "image_url", "image_url": {"url": ref}})
+            user_content = parts
+        else:
+            user_content = enhanced_prompt
+
         resp = await async_call_task(
             "image",
             messages=[{
-                "role": "user", 
-                "content": enhanced_prompt
+                "role": "user",
+                "content": user_content,
             }],
             trace=trace,
-            model="google/gemini-2.5-flash-image-preview",  # MISSION requirement: gemini-2.5-flash-image-preview only
+            model="google/gemini-2.5-flash-image-preview",  # MISSION requirement
             n=n,
             size=size,
         )
@@ -134,7 +152,12 @@ Output format: Please generate a high-quality image that matches the description
         try:
             # Enforce preview-only model per mission requirements
             model_name = "google/gemini-2.5-flash-image-preview"
-            raw = call_openrouter_images(prompt, n=n, size=size, model=model_name)
+            prompt_with_refs = prompt
+            if references:
+                hrefs = ", ".join([r for r in references if isinstance(r, str) and r.startswith("https://")][:5])
+                if hrefs:
+                    prompt_with_refs = f"{prompt}\nStyle references: {hrefs}"
+            raw = call_openrouter_images(prompt_with_refs, n=n, size=size, model=model_name)
             
             try:
                 if os.getenv("OPENROUTER_DEBUG") == "1":
