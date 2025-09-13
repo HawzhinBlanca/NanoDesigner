@@ -133,6 +133,7 @@ async def generate_images(
             model="google/gemini-2.5-flash-image-preview",  # MISSION requirement
             n=n,
             size=size,
+            temperature=0.85,
         )
         
         # Save response for debugging (debug-only)
