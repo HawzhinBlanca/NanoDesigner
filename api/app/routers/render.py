@@ -292,10 +292,10 @@ async def render(
     
     # Test mode: Return mock response when test header is present or no API key
     import os
-    test_mode_active = x_test_mode == "true"
+    test_mode_active = False  # Disable test mode
     no_api_key = not os.getenv("OPENROUTER_API_KEY")
-    logger.info(f"Test mode check: x_test_mode={x_test_mode}, test_mode_active={test_mode_active}, has_api_key={bool(os.getenv('OPENROUTER_API_KEY'))}, no_api_key={no_api_key}")
-    if test_mode_active or no_api_key:
+    logger.info(f"Test mode disabled. has_api_key={bool(os.getenv('OPENROUTER_API_KEY'))}, no_api_key={no_api_key}")
+    if no_api_key:
         logger.info("Test mode activated, returning mock response with base64 images")
         
         # Generate base64 test images

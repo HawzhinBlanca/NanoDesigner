@@ -148,9 +148,6 @@ export class RenderAPIClient {
         'Content-Type': 'application/json',
         'Idempotency-Key': idemKey,
       };
-      if (process.env.NEXT_PUBLIC_TEST_MODE === '1') {
-        headers['X-Test-Mode'] = 'true';
-      }
       const response = await this.makeRequest('/render', {
         method: 'POST',
         headers,
