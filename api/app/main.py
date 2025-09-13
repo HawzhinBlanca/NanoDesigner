@@ -18,7 +18,7 @@ from .middleware.request_response import (
     SecurityHeadersMiddleware,
     RequestResponseMiddleware
 )
-from .core.rate_limiter import RateLimitMiddleware
+from .core.rate_limits import RateLimitMiddleware
 from .routers import render, health, health_detailed, ingest, canon, critique, websocket, async_render, prometheus, admin, e2e, upload
 # Mock routers removed - moved to tests/mocks
 # from .routers import render_mock, render_simple
@@ -181,13 +181,16 @@ except ImportError:
     # Create the middleware if it doesn't exist
     pass
 
-# Add Redis-based rate limiting for production
+# Add rate limiting middleware
+# - In production: Redis-based
+# - In dev/test: in-memory fallback to avoid hard Redis dependency
+is_production = settings.service_env in ["prod", "production"]
 if settings.enable_inapp_rate_limit:
     app.add_middleware(
         RateLimitMiddleware,
         requests_per_minute=settings.rate_limit_rpm,
         burst_size=settings.rate_limit_burst,
-        use_redis=True  # Force Redis usage in production
+        use_redis=is_production
     )
 
 # Custom exception handlers
